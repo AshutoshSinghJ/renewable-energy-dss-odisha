@@ -1,0 +1,8 @@
+Best GridSearchCV Parameters
+===========================
+max_depth: 5
+min_samples_split: 2
+n_estimators: 100
+Best CV Score: 0.966667
+Final RF CV Mean: 0.966667
+Final RF CV Std: 0.066667
