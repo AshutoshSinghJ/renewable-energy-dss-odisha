@@ -1,836 +1,610 @@
-/* ═══════════════════════════════════════════════════════════════
-   Odisha Renewable Energy DSS — app.js  Phase 8 (Enhanced)
-   • Original Phase 7 code preserved intact
-   • NEW: Split Map, D3 charts, Agreement Inset, Feature Profile
-═══════════════════════════════════════════════════════════════ */
+'use strict';
 
-// ─────────────────── Constants ───────────────────
-const COLS = {
-  blockName:"block_name", district:"district_n", prediction:"final_prediction",
-  confidence:"rf_confidence", cluster:"cluster", solar:"solar_mean", wind:"wind_mean",
-  biomass:"pop_mean", distRoads:"dist_roads_mean", distTrans:"dist_trans_mean",
-  distSub:"dist_sub_mean", constraint:"constraint_pct"
+const LABEL_COLORS = { SOLAR: '#ffa726', WIND: '#7b1fa2', BIOMASS: '#43a047', HYBRID: '#0288d1' };
+const LABEL_ICONS  = { SOLAR: '☀️', WIND: '💨', BIOMASS: '🌿', HYBRID: '⚡' };
+
+const SUITABILITY_COLORS = [
+  { t: 0.80, c: '#1a9641' }, { t: 0.70, c: '#78c679' }, { t: 0.55, c: '#d0e048' },
+  { t: 0.40, c: '#fd8d3c' }, { t: 0.00, c: '#d7191c' },
+];
+
+const CONSTRAINT_VIEW_COLORS = [
+  { t: 0.80, c: '#d7191c' }, { t: 0.50, c: '#fd8d3c' }, { t: 0.20, c: '#ffffbf' }, { t: 0.00, c: '#1a9641' },
+];
+
+const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png';
+const TILE_OPT = { attribution: '© OSM © CARTO', subdomains: 'abcd', maxZoom: 19 };
+
+const state = {
+  activeView: 'map', mapView: 'block', energy: 'optimal',
+  districtFilter: 'all', labelFilter: 'all', showConstraints: false,
+  blockDataMap: {}, districtMap: {}, blockGeoJSON: null, districtGeoJSON: null,
+  _geoBlockKey: null, _geoDistKey: null,
+  predDistMode: 'block', scatterFeature: 'solar_mean', splitInited: false,
+  bounds: { solar: {min:999,max:0}, wind: {min:999,max:0}, biomass: {min:999,max:0} }
 };
-const COLORS = { SOLAR:"#FF8C00", WIND:"#1E90FF", BIOMASS:"#32CD32", HYBRID:"#9B59B6", UNKNOWN:"#2a3550" };
-const CHART_COLORS = {SOLAR:'rgba(255,140,0,0.8)',WIND:'rgba(30,144,255,0.8)',BIOMASS:'rgba(50,205,50,0.8)',HYBRID:'rgba(155,89,182,0.8)'};
-const CHART_GRID = 'rgba(100,150,255,0.08)', CHART_TEXT = '#7788aa';
 
-// ─────────────────── State ───────────────────
-let map, blocksLayer=null, blocksData=null, districtsData=null;
-let currentMode="allocation", currentScale="block";
-let confidenceThreshold=0, constraintMax=100;
-let activeEnergyFilter="ALL", activeDistrictFilter="ALL", drilldownDistrict=null;
-let overlayLayers={solar:null,wind:null,biomass:null};
-let chartBar=null, chartConf=null, chartScatter=null, chartConstraint=null, chartAgreement=null;
-let districtStats={};
+const BLOCK_CANDIDATES = ['block_name','BLOCK_NAME','Block_Name','blockname','BLOCKNAME','block','BLOCK','Block','blk_name','name','NAME','tahsil','TAHSIL'];
+const DIST_CANDIDATES  = ['district_n','district','DISTRICT','District','dist_name','DIST_NAME','district_name','DISTRICT_NAME','DistrictName','dname','DNAME','dtname','DTNAME','zilla','ZILLA'];
 
-// NEW: Split map state
-let mapLeft=null, mapRight=null, splitLayerLeft=null, splitLayerRight=null;
-let splitSyncing=false; // prevent infinite sync loop
-
-// ─────────────────── Map Initialization ───────────────────
-function initMap() {
-  map = L.map('map',{center:[20.5,84.5],zoom:7});
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19}).addTo(map);
+function scanGeoJSONProps(geojson) {
+  const sample = geojson.features.slice(0, 100);
+  const allKeys = new Set();
+  sample.forEach(f => Object.keys(f.properties || {}).forEach(k => allKeys.add(k)));
+  let blockKey = BLOCK_CANDIDATES.find(k => allKeys.has(k)) || [...allKeys].find(k => /block|blk|tahsil/i.test(k)) || null;
+  let distKey = DIST_CANDIDATES.find(k => allKeys.has(k)) || [...allKeys].find(k => /^dist(?!_roads|_trans|_sub|ance)|zilla/i.test(k)) || null;
+  return { blockKey, distKey };
 }
 
-// ─────────────────── Data Loading ───────────────────
-async function loadData() {
-  showSpinner("Loading block data...");
-  try {
-    const res = await fetch('data/blocks_complete.geojson');
-    if (!res.ok) throw new Error("blocks fetch failed: "+res.status);
-    blocksData = await res.json();
-    const res2 = await fetch('data/districts_fixed.geojson');
-    if (res2.ok) {
-      districtsData = await res2.json();
-      // DEBUG: log first feature's properties so we can see actual key names
-      if (districtsData.features && districtsData.features.length > 0) {
-        console.log('🗺️ districts.geojson first feature properties:', districtsData.features[0].properties);
-      }
-    } else console.warn("districts.geojson not found");
-    buildDistrictStats();
-    renderLayer(); updateStats(); updateSummary(); updateSummaryTable();
-    loadHotspot('solar','data/top_solar_zones.geojson','#FF8C00');
-    loadHotspot('wind','data/top_wind_zones.geojson','#1E90FF');
-    loadHotspot('biomass','data/top_biomass_zones.geojson','#32CD32');
-    // Render agreement inset after data loads
-    renderAgreementInset();
-  } catch(e) {
-    console.error("Failed to load data:",e);
-    document.getElementById('summary-content').innerHTML='<p style="color:#ff5555">Error loading data. Check DevTools (F12).</p>';
-  } finally { hideSpinner(); }
+function getBlockName(props) {
+  if (!props) return '';
+  if (state._geoBlockKey && props[state._geoBlockKey] != null) return String(props[state._geoBlockKey]).trim();
+  for (const k of BLOCK_CANDIDATES) if (props[k] != null) return String(props[k]).trim();
+  return '';
 }
 
-function showSpinner(msg) {
-  document.getElementById('loading-text').textContent = msg||'Loading...';
-  document.getElementById('loading-overlay').classList.remove('hidden');
-}
-function hideSpinner() { document.getElementById('loading-overlay').classList.add('hidden'); }
-
-// ─────────────────── Helpers ───────────────────
-function getPrediction(props) { return (props[COLS.prediction]||"UNKNOWN").toString().toUpperCase().trim(); }
-function getConfidence(props) { let c=parseFloat(props[COLS.confidence])||0; return c<=1?c*100:c; }
-function getConstraint(props) { return parseFloat(props[COLS.constraint])||0; }
-
-function passesFilters(props) {
-  const pred=getPrediction(props), conf=getConfidence(props), cons=getConstraint(props), dist=props[COLS.district]||"";
-  if (activeEnergyFilter!=="ALL" && pred!==activeEnergyFilter) return false;
-  if (conf<confidenceThreshold) return false;
-  if (cons>constraintMax) return false;
-  if (activeDistrictFilter!=="ALL" && dist!==activeDistrictFilter) return false;
-  return true;
+function getDistNameFromDistGeoJSON(props) {
+  if (!props) return '';
+  const keys = ['district_n','district','DISTRICT','District','dist_name','DIST_NAME','name','NAME','Name','district_name'];
+  for (const k of keys) if (props[k] != null) return String(props[k]).trim();
+  return '';
 }
 
-function getFilteredFeatures() {
-  if (!blocksData) return [];
-  let features = blocksData.features;
-  if (drilldownDistrict) features = features.filter(f=>f.properties[COLS.district]===drilldownDistrict);
-  return features.filter(f=>passesFilters(f.properties));
+function suitabilityColor(score) {
+  for (const { t, c } of SUITABILITY_COLORS) if (score >= t) return c;
+  return SUITABILITY_COLORS[SUITABILITY_COLORS.length - 1].c;
+}
+function constraintColor(pct) {
+  const f = pct / 100;
+  for (const { t, c } of CONSTRAINT_VIEW_COLORS) if (f >= t) return c;
+  return CONSTRAINT_VIEW_COLORS[CONSTRAINT_VIEW_COLORS.length - 1].c;
 }
 
-// ─────────────────── District Stats ───────────────────
-function buildDistrictStats() {
-  if (!blocksData) return;
-  districtStats={};
-  blocksData.features.forEach(f=>{
-    const p=f.properties, d=p[COLS.district]||"Unknown", pred=getPrediction(p), conf=getConfidence(p);
-    if (!districtStats[d]) districtStats[d]={counts:{},totalConf:0,blockCount:0,blocks:[]};
-    districtStats[d].counts[pred]=(districtStats[d].counts[pred]||0)+1;
-    districtStats[d].totalConf+=conf; districtStats[d].blockCount+=1; districtStats[d].blocks.push(f);
+// Dynamically scale feature heatmaps for sub-layers
+function getFeatureNorm(val, type) {
+  const b = state.bounds[type];
+  if (b.max === b.min) return 0;
+  return Math.max(0, Math.min(1, (val - b.min) / (b.max - b.min)));
+}
+
+function blockFillColor(row, energy) {
+  if (energy === 'optimal') return LABEL_COLORS[row._label] || '#3a4560';
+  if (energy === 'constraints') return constraintColor(parseFloat(row.constraint_pct) || 0);
+  if (energy === 'solar') return suitabilityColor(getFeatureNorm(parseFloat(row.solar_mean)||0, 'solar'));
+  if (energy === 'wind')  return suitabilityColor(getFeatureNorm(parseFloat(row.wind_mean)||0, 'wind'));
+  if (energy === 'biomass') return suitabilityColor(1 - getFeatureNorm(parseFloat(row.pop_mean)||0, 'biomass'));
+  return suitabilityColor(row._conf);
+}
+
+function blockLeafletStyle(row, energy) {
+  return { fillColor: blockFillColor(row, energy), fillOpacity: 0.78, color: '#1c2333', weight: 0.8 };
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  return lines.slice(1).map(line => {
+    if (!line.trim()) return null;
+    const vals = [];
+    let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; continue; }
+      if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; continue; }
+      cur += ch;
+    }
+    vals.push(cur.trim());
+    const row = {};
+    headers.forEach((h, i) => { row[h] = vals[i] || ''; });
+    return row;
+  }).filter(Boolean);
+}
+
+function buildBlockDataMap(csvRows) {
+  const NUMERIC = ['solar_mean','wind_mean','dist_roads_mean','dist_trans_mean','dist_sub_mean','constraint_pct','pop_mean','rf_confidence'];
+  const grouped = {};
+
+  csvRows.forEach(row => {
+    const key = (row.block_name || '').trim().toLowerCase();
+    if (!key) return;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(row);
   });
-  Object.keys(districtStats).forEach(d=>{
-    const s=districtStats[d];
-    s.dominant=Object.entries(s.counts).sort((a,b)=>b[1]-a[1])[0][0];
-    s.avgConf=s.totalConf/s.blockCount;
-    s.maupCount=s.blocks.filter(f=>getPrediction(f.properties)!==s.dominant).length;
-    s.agreeCount=s.blockCount-s.maupCount;
-    s.agreePct=((s.agreeCount/s.blockCount)*100).toFixed(1);
+
+  const bdm = {};
+  Object.entries(grouped).forEach(([key, rows]) => {
+    let r = rows.length === 1 ? { ...rows[0] } : {};
+    if (rows.length > 1) {
+      NUMERIC.forEach(col => r[col] = rows.reduce((s, x) => s + (parseFloat(x[col]) || 0), 0) / rows.length);
+      r.block_name = rows[0].block_name;
+      r.final_prediction = rows[0].final_prediction;
+      r.rf_prediction = rows[0].rf_prediction;
+      r.district = rows[0].district;
+    }
+
+    // PURE ML DATA EXTRACTION
+    r._label = (r.final_prediction || r.rf_prediction || 'SOLAR').trim().toUpperCase();
+    r._conf = parseFloat(r.rf_confidence) || 0;
+    r._district = (r.district || '').trim();
+    
+    // Bounds tracking for heatmaps
+    const s = parseFloat(r.solar_mean)||0, w = parseFloat(r.wind_mean)||0, p = parseFloat(r.pop_mean)||0;
+    if(s < state.bounds.solar.min) state.bounds.solar.min = s; if(s > state.bounds.solar.max) state.bounds.solar.max = s;
+    if(w < state.bounds.wind.min) state.bounds.wind.min = w; if(w > state.bounds.wind.max) state.bounds.wind.max = w;
+    if(p < state.bounds.biomass.min) state.bounds.biomass.min = p; if(p > state.bounds.biomass.max) state.bounds.biomass.max = p;
+
+    bdm[key] = r;
   });
+  return bdm;
 }
 
-// ─────────────────── Scale Switch ───────────────────
-function switchScale(scale) {
-  if (scale==='district'&&!districtsData){alert("districts.geojson not found in data/ folder.");return;}
-  currentScale=scale; drilldownDistrict=null;
-  document.querySelectorAll('.scale-btn').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()===scale));
-  document.getElementById('drilldown-back').style.display='none';
-  document.getElementById('stat-scale').textContent=scale.charAt(0).toUpperCase()+scale.slice(1);
-  showSpinner("Switching scale...");
-  setTimeout(()=>{renderLayer();updateStats();hideSpinner();},50);
+function modeLabelOf(rows) {
+  const counts = {};
+  rows.forEach(r => { counts[r._label] = (counts[r._label] || 0) + 1; });
+  return Object.entries(counts).sort(([,a],[,b]) => b-a)[0]?.[0] || 'SOLAR';
 }
 
-function drillIntoDistrict(districtName) {
-  drilldownDistrict=districtName; currentScale="block";
-  document.querySelectorAll('.scale-btn').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()==='block'));
-  document.getElementById('drilldown-back').style.display='block';
-  document.getElementById('stat-scale').textContent=`Block · ${districtName}`;
-  document.getElementById('district-filter').value=districtName;
-  activeDistrictFilter=districtName;
-  showSpinner(`Loading ${districtName} blocks...`);
-  setTimeout(()=>{
-    renderLayer(); updateStats();
-    if (blocksLayer) try{map.fitBounds(blocksLayer.getBounds(),{padding:[30,30]});}catch(e){}
-    hideSpinner();
-  },50);
+function buildDistrictMap(blockGeoJSON, blockDataMap) {
+  const grouped = {};
+
+  Object.values(blockDataMap).forEach(csvRow => {
+    const dist = csvRow._district;
+    if (!dist || dist === 'Unknown') return;
+    if (!grouped[dist]) grouped[dist] = { rows: [], blockCount: 0 };
+    grouped[dist].rows.push(csvRow);
+    grouped[dist].blockCount++;
+  });
+
+  const distMap = {};
+  Object.entries(grouped).forEach(([dist, { rows, blockCount }]) => {
+    const agg = { district: dist, blockCount };
+    agg._conf = rows.reduce((s, r) => s + r._conf, 0) / rows.length;
+    agg.constraint_pct = rows.reduce((s, r) => s + (parseFloat(r.constraint_pct)||0), 0) / rows.length;
+    
+    const lc = { SOLAR: 0, WIND: 0, BIOMASS: 0, HYBRID: 0 };
+    rows.forEach(r => { if(lc[r._label] !== undefined) lc[r._label]++; });
+    
+    agg._labelCounts = lc;
+    agg._label = modeLabelOf(rows);
+    agg._agreeCount = rows.filter(r => r._label === agg._label).length;
+    agg._agrees = (agg._agreeCount / blockCount) >= 0.5;
+    distMap[dist] = agg;
+  });
+  return distMap;
 }
 
-function exitDrilldown() {
-  drilldownDistrict=null; activeDistrictFilter="ALL"; currentScale="district";
-  document.getElementById('district-filter').value="ALL";
-  document.getElementById('drilldown-back').style.display='none';
-  document.querySelectorAll('.scale-btn').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase()==='district'));
-  document.getElementById('stat-scale').textContent='District';
-  renderLayer(); updateStats(); map.setView([20.5,84.5],7);
+const map = L.map('map', { center: [20.5, 84.5], zoom: 7, zoomControl: true });
+L.tileLayer(TILE_URL, TILE_OPT).addTo(map);
+
+let mainLayer = null, constraintLayer = null, mapDist = null, mapBlock = null;
+let splitLayerDist = null, splitLayerBlock = null;
+
+function buildHoverTooltip(blockName, distName, row) {
+  const color = LABEL_COLORS[row._label] || '#aaa', icon = LABEL_ICONS[row._label] || '';
+  return `
+    <div class="tt-name">${blockName}</div>
+    <div class="tt-district">${distName || '—'}</div>
+    <div class="tt-label" style="color:${color}">${icon} ${row._label} &nbsp;${(row._conf * 100).toFixed(1)}%</div>
+    <div class="tt-constraint">Constraint: ${parseFloat(row.constraint_pct).toFixed(1)}%</div>
+  `;
 }
 
-// ─────────────────── Layer Rendering ───────────────────
-function renderLayer() {
-  if (blocksLayer){map.removeLayer(blocksLayer);blocksLayer=null;}
-  if (currentScale==="district"&&districtsData&&!drilldownDistrict) renderDistrictLayer();
-  else renderBlockLayer();
+function buildBlockPopup(name, dist, row) {
+  const scoreColor = suitabilityColor(row._conf), pct = (row._conf * 100).toFixed(1);
+  const lColor = LABEL_COLORS[row._label] || '#aaa';
+  return `
+    <div class="map-popup">
+      <div class="popup-title">${name}</div><div class="popup-district">${dist}</div>
+      <div class="popup-label-pill" style="background:${lColor}22;color:${lColor};border:1px solid ${lColor}55">
+        ${LABEL_ICONS[row._label]} ${row._label}
+      </div>
+      <div class="popup-ml-label">Random Forest Confidence</div>
+      <div class="popup-ml-score" style="color:${scoreColor}">${pct}%</div>
+      <div class="popup-score-bar"><div class="popup-score-fill" style="width:${pct}%;background:${scoreColor}"></div></div>
+      <div class="popup-grid">
+        <span class="pk">Solar Mean</span><span class="pv">${parseFloat(row.solar_mean).toFixed(3)}</span>
+        <span class="pk">Wind Mean</span><span class="pv">${parseFloat(row.wind_mean).toFixed(3)}</span>
+        <span class="pk">Constraint</span><span class="pv">${parseFloat(row.constraint_pct).toFixed(1)}%</span>
+        <span class="pk">Dist. Roads</span><span class="pv">${parseFloat(row.dist_roads_mean).toFixed(2)}</span>
+      </div>
+    </div>`;
+}
+
+function buildDistrictPopup(name, agg) {
+  const pct = (agg._conf * 100).toFixed(1), scoreColor = suitabilityColor(agg._conf);
+  const lColor = LABEL_COLORS[agg._label] || '#aaa';
+  return `
+    <div class="map-popup">
+      <div class="popup-title">${name}</div><div class="popup-district">${agg.blockCount} blocks</div>
+      <div class="popup-label-pill" style="background:${lColor}22;color:${lColor};border:1px solid ${lColor}55">
+        ${LABEL_ICONS[agg._label]} Dominant: ${agg._label}
+      </div>
+      <div class="popup-ml-label">Avg RF Confidence</div>
+      <div class="popup-ml-score" style="color:${scoreColor}">${pct}%</div>
+      <div class="popup-score-bar"><div class="popup-score-fill" style="width:${pct}%;background:${scoreColor}"></div></div>
+      <div class="popup-grid">
+        <span class="pk">Solar blocks</span><span class="pv">${agg._labelCounts.SOLAR || 0}</span>
+        <span class="pk">Wind blocks</span><span class="pv">${agg._labelCounts.WIND || 0}</span>
+        <span class="pk">Biomass blocks</span><span class="pv">${agg._labelCounts.BIOMASS || 0}</span>
+        <span class="pk">Agreement</span><span class="pv">${agg._agreeCount}/${agg.blockCount}</span>
+      </div>
+    </div>`;
+}
+
+function clearMainLayer() { if (mainLayer) { map.removeLayer(mainLayer); mainLayer = null; } }
+function clearConstraintLayer() { if (constraintLayer) { map.removeLayer(constraintLayer); constraintLayer = null; } }
+
+function renderBlockLayer() {
+  clearMainLayer();
+  const { blockDataMap, blockGeoJSON, districtFilter, labelFilter, energy } = state;
+  const fd = districtFilter === 'all' ? null : districtFilter.toLowerCase();
+  const fl = labelFilter === 'all' ? null : labelFilter;
+  
+  const filtered = {
+    type: 'FeatureCollection',
+    features: (blockGeoJSON?.features || []).filter(feat => {
+      const props = feat.properties || {};
+      const row  = blockDataMap[getBlockName(props).toLowerCase()];
+      if (!row) return false;
+      if (fd && (row._district || '').toLowerCase() !== fd) return false;
+      if (fl && row._label !== fl) return false;
+      return true;
+    })
+  };
+
+  mainLayer = L.geoJSON(filtered, {
+    style: feat => {
+      const row = blockDataMap[getBlockName(feat.properties || {}).toLowerCase()];
+      return row ? blockLeafletStyle(row, energy) : { fillColor: '#3a4560', fillOpacity: 0.3, color: '#2a3448', weight: 0.5 };
+    },
+    onEachFeature: (feat, layer) => {
+      const props = feat.properties || {}, rawName = getBlockName(props) || 'Unknown';
+      const row = blockDataMap[rawName.toLowerCase()];
+      if (!row) return;
+      const dist = row._district || 'Unknown';
+      layer.bindTooltip(buildHoverTooltip(rawName, dist, row), { className: 'dss-tooltip', sticky: true, opacity: 1 });
+      layer.on({
+        mouseover(e) { e.target.setStyle({ weight: 2, color: '#4fc3f7', fillOpacity: 0.92 }); e.target.bringToFront(); },
+        mouseout(e)  { if (mainLayer) mainLayer.resetStyle(e.target); },
+        click()      { layer.bindPopup(buildBlockPopup(rawName, dist, row)).openPopup(); showBlockInfoPanel(rawName, dist, row); },
+      });
+    }
+  }).addTo(map);
+
+  if (state.showConstraints) renderConstraintLayer();
 }
 
 function renderDistrictLayer() {
-  blocksLayer=L.geoJSON(districtsData,{style:styleDistrict,onEachFeature:onEachDistrict}).addTo(map);
-  // Auto-zoom to fit all districts
-  try { map.fitBounds(blocksLayer.getBounds(), {padding:[20,20]}); } catch(e){}
-  document.getElementById('legend-box').style.display=currentMode==='allocation'?'block':'none';
-  document.getElementById('constraint-legend').style.display=currentMode==='constraints'?'block':'none';
-}
-
-/** Try multiple common property key variants to find the district name */
-function getDistrictNameFromFeature(feature) {
-  const p = feature.properties;
-  // Try known keys in priority order
-  const candidates = ['district_n','district_name','DISTRICT','District','dist_name','NAME','name','dtname','dt_name'];
-  for (const key of candidates) {
-    if (p[key] && typeof p[key]==='string' && p[key].trim()!=='') return p[key].trim();
-  }
-  // Last resort: find any string property that matches a known district stat key
-  for (const key of Object.keys(p)) {
-    const val = (p[key]||'').toString().trim();
-    if (districtStats[val]) return val;
-  }
-  return null;
-}
-
-function styleDistrict(feature) {
-  const d = getDistrictNameFromFeature(feature);
-  const stat = d ? districtStats[d] : null;
-
-  // Always show district boundaries even if no stat match
-  const baseStyle = {color:'#4466aa', weight:1.2, opacity:0.9};
-
-  if (!stat) {
-    // Visible fallback — dim blue so boundaries are still visible
-    return {...baseStyle, fillColor:'#1e2d50', fillOpacity:0.6};
-  }
-  if (currentMode==='constraints') {
-    const cPct = parseFloat(feature.properties.constraint_pct) || 0;
-    return {...baseStyle, fillColor:constraintColor(cPct), fillOpacity:0.75};
-  }
-  const col = COLORS[stat.dominant] || '#1e2d50';
-  return {...baseStyle, fillColor:col, fillOpacity:0.7, color:col, opacity:0.95};
-}
-
-function onEachDistrict(feature,layer) {
-  const d = getDistrictNameFromFeature(feature);
-  const stat = d ? districtStats[d] : null;
-
-  // Always bind a tooltip
-  const label = d || 'Unknown District';
-  const tipContent = stat
-    ? `<strong>${label}</strong><br/><span style="color:${COLORS[stat.dominant]||'#aaa'}">${stat.dominant}</span> — ${stat.avgConf.toFixed(1)}% avg conf<br/>${stat.blockCount} blocks · ${stat.maupCount} MAUP`
-    : `<strong>${label}</strong><br/><em style="color:#556688">No block data matched</em>`;
-  layer.bindTooltip(tipContent, {sticky:true, opacity:0.97});
-
-  layer.on('mouseover', function(){this.setStyle({weight:2.5, fillOpacity:0.92});this.bringToFront();});
-  layer.on('mouseout',  function(){if(blocksLayer)blocksLayer.resetStyle(this);});
-  layer.on('click', function(){
-    if (d) drillIntoDistrict(d);
-    else {
-      // Debug: log the actual properties so user can fix COLS mapping
-      console.warn('District feature properties:', feature.properties);
+  clearMainLayer();
+  if (!state.districtGeoJSON) return;
+  mainLayer = L.geoJSON(state.districtGeoJSON, {
+    style: feat => {
+      const agg = state.districtMap[getDistNameFromDistGeoJSON(feat.properties || '')];
+      if (!agg) return { fillColor: '#3a4560', fillOpacity: 0.25, color: '#2a3448', weight: 1 };
+      const fillColor = state.energy === 'optimal' ? (LABEL_COLORS[agg._label] || '#3a4560') :
+        state.energy === 'constraints' ? constraintColor(agg.constraint_pct) : suitabilityColor(agg._conf);
+      return { fillColor, fillOpacity: 0.72, color: '#1c2333', weight: 1.2 };
+    },
+    onEachFeature: (feat, layer) => {
+      const name = getDistNameFromDistGeoJSON(feat.properties || '') || 'Unknown', agg = state.districtMap[name];
+      if (!agg) return;
+      const lColor = LABEL_COLORS[agg._label] || '#aaa';
+      layer.bindTooltip(`
+        <div class="tt-name">${name}</div><div class="tt-district">${agg.blockCount} blocks</div>
+        <div class="tt-label" style="color:${lColor}">${LABEL_ICONS[agg._label]} ${agg._label}</div>
+      `, { className: 'dss-tooltip', sticky: true, opacity: 1 });
+      layer.on({
+        mouseover(e) { e.target.setStyle({ weight: 2.5, color: '#4fc3f7', fillOpacity: 0.9 }); e.target.bringToFront(); },
+        mouseout(e)  { if (mainLayer) mainLayer.resetStyle(e.target); },
+        click()      { layer.bindPopup(buildDistrictPopup(name, agg)).openPopup(); },
+      });
     }
-  });
+  }).addTo(map);
 }
 
-function renderBlockLayer() {
-  let features=blocksData?[...blocksData.features]:[];
-  if (drilldownDistrict) features=features.filter(f=>f.properties[COLS.district]===drilldownDistrict);
-  const filteredGeoJSON={type:"FeatureCollection",features:features.filter(f=>passesFilters(f.properties))};
-
-  if (currentMode==="allocation") {
-    blocksLayer=L.geoJSON(filteredGeoJSON,{style:styleAllocation,onEachFeature:onEachBlock}).addTo(map);
-  } else if (currentMode==="constraints") {
-    blocksLayer=L.geoJSON(filteredGeoJSON,{style:f=>({fillColor:constraintColor(getConstraint(f.properties)),fillOpacity:0.78,color:'#1a2035',weight:0.5}),onEachFeature:onEachBlock}).addTo(map);
-  } else {
-    const colMap={solar:COLS.solar,wind:COLS.wind,biomass:COLS.biomass};
-    const scaleMap={solar:['#d73027','#fee08b','#1a9850'],wind:['#deebf7','#6baed6','#08519c'],biomass:['#ffffcc','#a1dab4','#225ea8']};
-    const col=colMap[currentMode];
-    const vals=filteredGeoJSON.features.map(f=>parseFloat(f.properties[col])).filter(v=>!isNaN(v));
-    if (vals.length===0){blocksLayer=L.geoJSON(filteredGeoJSON,{onEachFeature:onEachBlock}).addTo(map);return;}
-    const scale=chroma.scale(scaleMap[currentMode]).domain([Math.min(...vals),Math.max(...vals)]);
-    blocksLayer=L.geoJSON(filteredGeoJSON,{style:f=>{const v=parseFloat(f.properties[col]);return{fillColor:isNaN(v)?"#1a2035":scale(v).hex(),fillOpacity:0.75,color:"#1a2540",weight:0.5};},onEachFeature:onEachBlock}).addTo(map);
-  }
-  document.getElementById('legend-box').style.display=currentMode==='allocation'?'block':'none';
-  document.getElementById('constraint-legend').style.display=currentMode==='constraints'?'block':'none';
-}
-
-function constraintColor(pct) {
-  if (pct<20) return '#1a9850';
-  if (pct<50) return '#fee08b';
-  if (pct<80) return '#f46d43';
-  return '#8B0000';
-}
-
-function styleAllocation(feature) {
-  const pred=getPrediction(feature.properties);
-  return {fillColor:COLORS[pred]||COLORS.UNKNOWN,fillOpacity:0.65,color:COLORS[pred]||COLORS.UNKNOWN,weight:0.8,opacity:0.9};
-}
-
-function onEachBlock(feature,layer) {
-  const p=feature.properties, name=p[COLS.blockName]||"Unknown";
-  const pred=getPrediction(p), conf=getConfidence(p).toFixed(1), cons=getConstraint(p).toFixed(1);
-  layer.bindTooltip(`<strong>${name}</strong><br/>${p[COLS.district]||""}<br/><span style="color:${COLORS[pred]||'#aaa'}">${pred}</span> — ${conf}% conf<br/>Constraint: ${cons}%`,{sticky:true,opacity:0.97});
-  layer.on('mouseover',function(){this.setStyle({weight:2.5,fillOpacity:0.9});this.bringToFront();});
-  layer.on('mouseout',function(){if(blocksLayer)blocksLayer.resetStyle(this);});
-  layer.on('click',function(){showDetail(p);});
-}
-
-// ─────────────────── Detail Panel ───────────────────
-function showDetail(p) {
-  const pred=getPrediction(p), conf=getConfidence(p), cons=getConstraint(p);
-  document.getElementById('detail-default').style.display='none';
-  document.getElementById('detail-block').style.display='block';
-  document.getElementById('detail-block-name').textContent=p[COLS.blockName]||"Unknown";
-  document.getElementById('detail-district').textContent=p[COLS.district]?"📍 "+p[COLS.district]:"";
-  const badge=document.getElementById('detail-prediction-badge');
-  badge.textContent=pred; badge.className="badge-"+pred;
-  const confBar=document.getElementById('detail-confidence-bar');
-  confBar.style.width=conf+"%"; confBar.style.background=COLORS[pred]||"#aaa";
-  document.getElementById('detail-confidence-text').textContent=conf.toFixed(1)+"%";
-  const consBar=document.getElementById('detail-constraint-bar');
-  consBar.style.width=cons+"%"; consBar.style.background=constraintColor(cons);
-  document.getElementById('detail-constraint-text').textContent=cons.toFixed(1)+"%";
-  document.getElementById('detail-cluster').textContent="Cluster "+(p[COLS.cluster]??"N/A");
-  document.getElementById('detail-features-table').innerHTML=
-    [["Solar Mean",p[COLS.solar]],["Wind Mean",p[COLS.wind]],["Population Mean",p[COLS.biomass]],
-     ["Dist. to Roads",p[COLS.distRoads]],["Dist. to Trans.",p[COLS.distTrans]],
-     ["Dist. to Subst.",p[COLS.distSub]],["Constraint %",p[COLS.constraint]]]
-    .map(([l,v])=>v!=null?`<tr><td>${l}</td><td>${parseFloat(v).toFixed(3)}</td></tr>`:"").join("");
-  // NEW: render mini D3 feature profile bar
-  renderDetailFeatureBar(p, pred);
-}
-
-function closeDetail() {
-  document.getElementById('detail-default').style.display='block';
-  document.getElementById('detail-block').style.display='none';
-}
-
-// ─────────────────── NEW: D3 Mini Feature Profile Bar ───────────────────
-function renderDetailFeatureBar(p, pred) {
-  const svg = d3.select('#detail-feature-bar');
-  svg.selectAll('*').remove();
-  const container = document.getElementById('detail-feature-bar');
-  const W = container.clientWidth || 220, H = 110;
-  svg.attr('viewBox', `0 0 ${W} ${H}`);
-
-  const feats = [
-    {key:COLS.solar, label:'Solar'},
-    {key:COLS.wind, label:'Wind'},
-    {key:COLS.biomass, label:'Pop'},
-    {key:COLS.distRoads, label:'Roads'},
-    {key:COLS.distTrans, label:'Trans'},
-    {key:COLS.distSub, label:'Subst'},
-    {key:COLS.constraint, label:'Constr'}
-  ].map(f=>({label:f.label, val: Math.abs(parseFloat(p[f.key])||0)}));
-
-  const maxVal = d3.max(feats, d=>d.val) || 1;
-  const margin = {top:10,right:8,bottom:22,left:32};
-  const w = W-margin.left-margin.right, h = H-margin.top-margin.bottom;
-
-  const g = svg.append('g').attr('transform',`translate(${margin.left},${margin.top})`);
-  const x = d3.scaleBand().domain(feats.map(d=>d.label)).range([0,w]).padding(0.25);
-  const y = d3.scaleLinear().domain([0,maxVal]).nice().range([h,0]);
-
-  // Grid
-  g.append('g').attr('class','d3-grid')
-   .call(d3.axisLeft(y).ticks(3).tickSize(-w).tickFormat(''))
-   .select('.domain').remove();
-
-  // Bars
-  const color = COLORS[pred]||'#6699ff';
-  g.selectAll('rect').data(feats).enter().append('rect')
-   .attr('x',d=>x(d.label)).attr('y',d=>y(d.val))
-   .attr('width',x.bandwidth()).attr('height',d=>h-y(d.val))
-   .attr('fill',color).attr('opacity',0.75).attr('rx',2);
-
-  // X axis
-  g.append('g').attr('transform',`translate(0,${h})`).attr('class','d3-axis')
-   .call(d3.axisBottom(x).tickSize(0))
-   .select('.domain').remove();
-  g.selectAll('.d3-axis text').style('fill','#556688').style('font-size','9px');
-
-  // Y axis (minimal)
-  g.append('g').attr('class','d3-axis')
-   .call(d3.axisLeft(y).ticks(3).tickFormat(d=>d3.format('.1s')(d)))
-   .select('.domain').remove();
-}
-
-// ─────────────────── Filters ───────────────────
-function switchLayer(mode) { currentMode=mode; renderLayer(); }
-
-function filterByConfidence(val) {
-  confidenceThreshold=parseFloat(val);
-  document.getElementById('conf-value').textContent=val+"%";
-  renderLayer(); updateStats();
-}
-
-function filterByConstraint(val) {
-  constraintMax=parseFloat(val);
-  document.getElementById('constraint-value').textContent=val+"%";
-  renderLayer(); updateStats();
-}
-
-function setEnergyFilter(btn) {
-  activeEnergyFilter=btn.dataset.energy;
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active'); renderLayer(); updateStats();
-}
-
-function setDistrictFilter(val) {
-  activeDistrictFilter=val;
-  if (val!=="ALL"&&currentScale==="district") drillIntoDistrict(val);
-  else if (val==="ALL"&&drilldownDistrict) exitDrilldown();
-  else { renderLayer(); updateStats(); }
-}
-
-// ─────────────────── Hotspot Overlays ───────────────────
-async function loadHotspot(type,url,color) {
-  try {
-    const res=await fetch(url); if(!res.ok)return;
-    const data=await res.json();
-    overlayLayers[type]=L.geoJSON(data,{style:{color,weight:2,fillColor:color,fillOpacity:0.2,dashArray:'5 5'}});
-  } catch(e){console.log("Hotspot not loaded:",type);}
-}
-
-function toggleOverlay(type) {
-  const layer=overlayLayers[type];
-  if(!layer){console.log("Overlay not ready yet:",type);return;}
-  if(map.hasLayer(layer))map.removeLayer(layer); else layer.addTo(map);
-}
-
-// ─────────────────── Stats Bar ───────────────────
-function updateStats() {
-  if(!blocksData)return;
-  const counts={SOLAR:0,WIND:0,BIOMASS:0,HYBRID:0};
-  let highConf=0, showing=0;
-  getFilteredFeatures().forEach(f=>{
-    const pred=getPrediction(f.properties), conf=getConfidence(f.properties);
-    if(counts[pred]!==undefined)counts[pred]++;
-    if(conf>=80)highConf++; showing++;
-  });
-  document.getElementById('stat-solar').textContent=counts.SOLAR;
-  document.getElementById('stat-wind').textContent=counts.WIND;
-  document.getElementById('stat-biomass').textContent=counts.BIOMASS;
-  document.getElementById('stat-hybrid').textContent=counts.HYBRID;
-  document.getElementById('stat-highconf').textContent=`${highConf} (${showing>0?((highConf/showing)*100).toFixed(1):0}%)`;
-  document.getElementById('stat-showing').textContent=showing;
-}
-
-function updateSummary() {
-  if(!blocksData)return;
-  const counts={SOLAR:0,WIND:0,BIOMASS:0,HYBRID:0};
-  blocksData.features.forEach(f=>{const p=getPrediction(f.properties);if(counts[p]!==undefined)counts[p]++;});
-  document.getElementById('summary-content').innerHTML=`
-    <p>☀️ Solar: <strong style="color:#FF8C00">${counts.SOLAR}</strong></p>
-    <p>💨 Wind: <strong style="color:#1E90FF">${counts.WIND}</strong></p>
-    <p>🌿 Biomass: <strong style="color:#32CD32">${counts.BIOMASS}</strong></p>
-    <p>⚡ Hybrid: <strong style="color:#9B59B6">${counts.HYBRID}</strong></p>
-    <p>📊 Total: <strong style="color:#aac4ff">${blocksData.features.length}</strong> blocks</p>`;
-}
-
-function updateSummaryTable() {
-  if(!blocksData||Object.keys(districtStats).length===0)return;
-  const totalBlocks=blocksData.features.length;
-  let bAgree=0, bMaup=0;
-  blocksData.features.forEach(f=>{
-    const p=f.properties, pred=getPrediction(p), dStat=districtStats[p[COLS.district]];
-    if(dStat){if(pred===dStat.dominant)bAgree++;else bMaup++;}
-  });
-  const bAgreePct=((bAgree/totalBlocks)*100).toFixed(1);
-  const totalDistricts=Object.keys(districtStats).length;
-  const dCounts={};
-  Object.values(districtStats).forEach(s=>{dCounts[s.dominant]=(dCounts[s.dominant]||0)+1;});
-  const topDist=Object.entries(dCounts).sort((a,b)=>b[1]-a[1])[0]?.[0]||'N/A';
-  document.getElementById('summary-table-body').innerHTML=`
-    <tr><td>Block</td><td>${totalBlocks}</td><td style="color:${COLORS['SOLAR']}">SOLAR</td><td class="agree-pct">${bAgreePct}%</td><td class="maup-count">${bMaup}</td></tr>
-    <tr><td>District</td><td>${totalDistricts}</td><td style="color:${COLORS[topDist]||'#aaa'}">${topDist}</td><td class="agree-pct">—</td><td class="maup-count">—</td></tr>`;
-}
-
-// ─────────────────── NEW: Agreement Inset (D3 donut) ───────────────────
-function renderAgreementInset() {
-  if (!blocksData || Object.keys(districtStats).length===0) return;
-  let agree=0, disagree=0;
-  blocksData.features.forEach(f=>{
-    const p=f.properties, pred=getPrediction(p), dStat=districtStats[p[COLS.district]];
-    if(dStat){ if(pred===dStat.dominant) agree++; else disagree++; }
-  });
-  const total=agree+disagree;
-  const svg=d3.select('#inset-svg');
-  svg.selectAll('*').remove();
-  const W=140, H=80, cx=70, cy=40, outerR=32, innerR=18;
-  const data=[{val:agree,color:'#32CD32'},{val:disagree,color:'#FF5555'}];
-  const pie=d3.pie().value(d=>d.val).sort(null);
-  const arc=d3.arc().innerRadius(innerR).outerRadius(outerR);
-  const g=svg.append('g').attr('transform',`translate(${cx},${cy})`);
-  g.selectAll('path').data(pie(data)).enter().append('path')
-    .attr('d',arc).attr('fill',d=>d.data.color).attr('opacity',0.85)
-    .attr('stroke','rgba(0,0,0,0.3)').attr('stroke-width',1);
-  // Center text
-  g.append('text').attr('text-anchor','middle').attr('dy','0.35em')
-    .attr('fill','#ccd9ff').attr('font-size','11px').attr('font-family','Rajdhani, sans-serif').attr('font-weight','700')
-    .text(`${((agree/total)*100).toFixed(0)}%`);
-  // Side labels
-  svg.append('text').attr('x',112).attr('y',28).attr('fill','#32CD32').attr('font-size','9px').attr('font-family','Inter, sans-serif').text(agree);
-  svg.append('text').attr('x',112).attr('y',54).attr('fill','#FF5555').attr('font-size','9px').attr('font-family','Inter, sans-serif').text(disagree);
-}
-
-// ─────────────────── Tab Switching ───────────────────
-function showTab(tab) {
-  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(el=>el.classList.remove('active'));
-  document.getElementById('tab-'+tab).classList.add('active');
-  document.getElementById('btn-'+tab).classList.add('active');
-  if(tab==='map') setTimeout(()=>map&&map.invalidateSize(),100);
-  if(tab==='charts') setTimeout(()=>{ buildCharts(); buildD3Charts(); },100);
-  if(tab==='split') setTimeout(()=>initSplitMap(),150);
-}
-
-// ─────────────────── Chart.js Charts ───────────────────
-function buildCharts() {
-  if(!blocksData)return;
-  buildBarChart('block'); buildConfChart(); buildScatterChart(); buildConstraintChart(); buildAgreementChart();
-}
-
-function buildBarChart(mode) {
-  const ctx=document.getElementById('chart-bar'); if(!ctx)return;
-  if(chartBar)chartBar.destroy();
-  let labels,data,bgColors;
-  if(mode==='block'){
-    const counts={SOLAR:0,WIND:0,BIOMASS:0,HYBRID:0};
-    blocksData.features.forEach(f=>{const p=getPrediction(f.properties);if(counts[p]!==undefined)counts[p]++;});
-    labels=Object.keys(counts); data=Object.values(counts); bgColors=labels.map(l=>CHART_COLORS[l]);
-  } else {
-    const counts={};
-    Object.values(districtStats).forEach(s=>{counts[s.dominant]=(counts[s.dominant]||0)+1;});
-    labels=Object.keys(counts); data=Object.values(counts); bgColors=labels.map(l=>CHART_COLORS[l]||'rgba(100,150,255,0.6)');
-  }
-  chartBar=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:mode==='block'?'Blocks':'Districts',data,backgroundColor:bgColors,borderRadius:4,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${ctx.raw} ${mode}s`}}},scales:{x:{ticks:{color:CHART_TEXT},grid:{color:CHART_GRID}},y:{ticks:{color:CHART_TEXT,stepSize:1},grid:{color:CHART_GRID}}}}});
-}
-
-function setBarMode(mode,btn) {
-  document.querySelectorAll('#card-bar .ctoggle').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active'); buildBarChart(mode);
-}
-
-function buildConfChart() {
-  const ctx=document.getElementById('chart-conf'); if(!ctx)return;
-  if(chartConf)chartConf.destroy();
-  const bins=['60-70','70-80','80-90','90-95','95-99','99-100'], counts=[0,0,0,0,0,0];
-  const colors=['rgba(255,100,100,0.75)','rgba(255,165,0,0.75)','rgba(255,200,50,0.75)','rgba(100,200,100,0.75)','rgba(50,180,255,0.75)','rgba(100,150,255,0.75)'];
-  blocksData.features.forEach(f=>{
-    const c=getConfidence(f.properties);
-    if(c<70)counts[0]++; else if(c<80)counts[1]++; else if(c<90)counts[2]++; else if(c<95)counts[3]++; else if(c<99)counts[4]++; else counts[5]++;
-  });
-  chartConf=new Chart(ctx,{type:'bar',data:{labels:bins,datasets:[{label:'Blocks',data:counts,backgroundColor:colors,borderRadius:4,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${ctx.raw} blocks`}}},scales:{x:{ticks:{color:CHART_TEXT},grid:{color:CHART_GRID}},y:{ticks:{color:CHART_TEXT},grid:{color:CHART_GRID}}}}});
-}
-
-function buildScatterChart() {
-  const ctx=document.getElementById('chart-scatter'); if(!ctx)return;
-  if(chartScatter)chartScatter.destroy();
-  const feature=document.getElementById('scatter-feature')?.value||'solar_mean';
-  const datasets={};
-  blocksData.features.forEach(f=>{
-    const p=f.properties, pred=getPrediction(p), x=parseFloat(p[feature]), conf=getConfidence(p);
-    if(isNaN(x))return;
-    if(!datasets[pred])datasets[pred]=[];
-    datasets[pred].push({x,y:parseFloat(conf.toFixed(1))});
-  });
-  const ds=Object.entries(datasets).map(([pred,points])=>({label:pred,data:points,backgroundColor:CHART_COLORS[pred]||'rgba(200,200,200,0.6)',pointRadius:3,pointHoverRadius:5}));
-  chartScatter=new Chart(ctx,{type:'scatter',data:{datasets:ds},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:CHART_TEXT,boxWidth:10,font:{size:11}}}},scales:{x:{title:{display:true,text:feature.replace(/_/g,' '),color:CHART_TEXT},ticks:{color:CHART_TEXT},grid:{color:CHART_GRID}},y:{title:{display:true,text:'Confidence %',color:CHART_TEXT},ticks:{color:CHART_TEXT},grid:{color:CHART_GRID},min:55,max:105}}}});
-}
-
-function updateScatter() { buildScatterChart(); }
-
-function buildConstraintChart() {
-  const ctx=document.getElementById('chart-constraint'); if(!ctx)return;
-  if(chartConstraint)chartConstraint.destroy();
-  const distAvg={};
-  blocksData.features.forEach(f=>{
-    const p=f.properties, d=p[COLS.district]||'Unknown', c=getConstraint(p);
-    if(!distAvg[d])distAvg[d]={sum:0,n:0};
-    distAvg[d].sum+=c; distAvg[d].n++;
-  });
-  const entries=Object.entries(distAvg).map(([d,v])=>({d,avg:v.sum/v.n})).sort((a,b)=>b.avg-a.avg);
-  const labels=entries.map(e=>e.d), data=entries.map(e=>parseFloat(e.avg.toFixed(1)));
-  const bgs=data.map(v=>v<20?'rgba(26,152,80,0.8)':v<50?'rgba(254,224,139,0.85)':v<80?'rgba(244,109,67,0.8)':'rgba(139,0,0,0.85)');
-  chartConstraint=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Avg Constraint %',data,backgroundColor:bgs,borderRadius:3,borderSkipped:false}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${ctx.raw}%`}}},scales:{x:{min:0,max:100,ticks:{color:CHART_TEXT,callback:v=>v+'%'},grid:{color:CHART_GRID}},y:{ticks:{color:CHART_TEXT,font:{size:10}},grid:{color:CHART_GRID}}}}});
-}
-
-function buildAgreementChart() {
-  const ctx=document.getElementById('chart-agreement'); if(!ctx)return;
-  if(chartAgreement)chartAgreement.destroy();
-  const entries=Object.entries(districtStats).sort((a,b)=>b[1].maupCount-a[1].maupCount).slice(0,20);
-  const labels=entries.map(([d])=>d), agree=entries.map(([,s])=>s.agreeCount), maup=entries.map(([,s])=>s.maupCount);
-  chartAgreement=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Agree',data:agree,backgroundColor:'rgba(50,205,80,0.75)',borderRadius:3,borderSkipped:false},{label:'MAUP Disagree',data:maup,backgroundColor:'rgba(255,80,80,0.75)',borderRadius:3,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:CHART_TEXT,boxWidth:10,font:{size:11}}}},scales:{x:{stacked:true,ticks:{color:CHART_TEXT,font:{size:10},maxRotation:45},grid:{color:CHART_GRID}},y:{stacked:true,ticks:{color:CHART_TEXT},grid:{color:CHART_GRID}}}}});
-}
-
-// ─────────────────── NEW: D3 Charts ───────────────────
-function buildD3Charts() {
-  if (!blocksData || Object.keys(districtStats).length===0) return;
-  buildD3ConfLine();
-  buildD3StackBar();
-}
-
-/** D3 Line chart: average confidence per district */
-function buildD3ConfLine() {
-  const container = document.getElementById('d3-conf-line');
-  d3.select(container).selectAll('*').remove();
-  const entries = Object.entries(districtStats)
-    .map(([d,s])=>({d, avgConf:s.avgConf}))
-    .sort((a,b)=>b.avgConf-a.avgConf);
-
-  const margin={top:12,right:20,bottom:62,left:42};
-  const W=container.clientWidth||600, H=260;
-  const w=W-margin.left-margin.right, h=H-margin.top-margin.bottom;
-
-  const svg=d3.select(container).append('svg')
-    .attr('width','100%').attr('height',H).attr('viewBox',`0 0 ${W} ${H}`);
-  const g=svg.append('g').attr('transform',`translate(${margin.left},${margin.top})`);
-
-  const x=d3.scaleBand().domain(entries.map(e=>e.d)).range([0,w]).padding(0.1);
-  const y=d3.scaleLinear().domain([d3.min(entries,e=>e.avgConf)*0.98, 100]).range([h,0]).nice();
-
-  // Grid
-  g.append('g').attr('class','d3-grid')
-   .call(d3.axisLeft(y).ticks(5).tickSize(-w).tickFormat(''))
-   .select('.domain').remove();
-
-  // Area
-  const area=d3.area()
-    .x(d=>x(d.d)+x.bandwidth()/2)
-    .y0(h).y1(d=>y(d.avgConf))
-    .curve(d3.curveMonotoneX);
-  g.append('path').datum(entries).attr('fill','rgba(100,150,255,0.1)')
-    .attr('stroke','none').attr('d',area);
-
-  // Line
-  const line=d3.line()
-    .x(d=>x(d.d)+x.bandwidth()/2)
-    .y(d=>y(d.avgConf))
-    .curve(d3.curveMonotoneX);
-  g.append('path').datum(entries).attr('fill','none')
-    .attr('stroke','#6699ff').attr('stroke-width',1.8).attr('d',line);
-
-  // Dots
-  const tooltip=d3.select(container).append('div').attr('class','d3-tooltip').style('opacity',0).style('position','absolute');
-  g.selectAll('circle').data(entries).enter().append('circle')
-    .attr('cx',d=>x(d.d)+x.bandwidth()/2).attr('cy',d=>y(d.avgConf))
-    .attr('r',3.5).attr('fill','#aac4ff').attr('stroke','#6699ff').attr('stroke-width',1)
-    .on('mouseover',(event,d)=>{
-      tooltip.style('opacity',1).html(`<strong>${d.d}</strong><br/>Avg Conf: ${d.avgConf.toFixed(1)}%`)
-        .style('left',(event.offsetX+10)+'px').style('top',(event.offsetY-28)+'px');
+function renderConstraintLayer() {
+  clearConstraintLayer();
+  if (!state.blockGeoJSON) return;
+  const fc = {
+    type: 'FeatureCollection',
+    features: state.blockGeoJSON.features.filter(feat => {
+      const r = state.blockDataMap[getBlockName(feat.properties || {}).toLowerCase()];
+      return r && parseFloat(r.constraint_pct) > 80;
     })
-    .on('mouseout',()=>tooltip.style('opacity',0));
-
-  // Axes
-  g.append('g').attr('class','d3-axis').attr('transform',`translate(0,${h})`)
-   .call(d3.axisBottom(x).tickSize(0))
-   .selectAll('text').attr('transform','rotate(-40)').style('text-anchor','end')
-   .style('fill','#7788aa').style('font-size','9px');
-  g.select('.d3-axis .domain').remove();
-
-  g.append('g').attr('class','d3-axis')
-   .call(d3.axisLeft(y).ticks(5).tickFormat(d=>d+'%'))
-   .select('.domain').remove();
-  g.selectAll('.d3-axis text').style('fill','#7788aa').style('font-size','10px');
+  };
+  constraintLayer = L.geoJSON(fc, { style: { fillColor: '#ff1744', fillOpacity: 0.35, color: '#ff1744', weight: 1, dashArray: '4,4' }, interactive: false }).addTo(map);
 }
 
-/** D3 Stacked bar: energy type breakdown per district */
-function buildD3StackBar() {
-  const container = document.getElementById('d3-stack-bar');
-  d3.select(container).selectAll('*').remove();
-
-  const types=['SOLAR','WIND','BIOMASS','HYBRID'];
-  const districts=Object.keys(districtStats).sort();
-  const data=districts.map(d=>{
-    const s=districtStats[d];
-    return {district:d, SOLAR:s.counts.SOLAR||0, WIND:s.counts.WIND||0, BIOMASS:s.counts.BIOMASS||0, HYBRID:s.counts.HYBRID||0};
-  });
-
-  const stackedData=d3.stack().keys(types)(data);
-  const margin={top:14,right:80,bottom:60,left:36};
-  const W=Math.max(container.clientWidth||700, districts.length*28);
-  const H=300;
-  const w=W-margin.left-margin.right, h=H-margin.top-margin.bottom;
-
-  const svgContainer=d3.select(container).append('div').style('overflow-x','auto');
-  const svg=svgContainer.append('svg').attr('width',W).attr('height',H);
-  const g=svg.append('g').attr('transform',`translate(${margin.left},${margin.top})`);
-
-  const x=d3.scaleBand().domain(districts).range([0,w]).padding(0.18);
-  const y=d3.scaleLinear().domain([0,d3.max(data,d=>d.SOLAR+d.WIND+d.BIOMASS+d.HYBRID)]).nice().range([h,0]);
-
-  const typeColors={SOLAR:'rgba(255,140,0,0.82)',WIND:'rgba(30,144,255,0.82)',BIOMASS:'rgba(50,205,50,0.82)',HYBRID:'rgba(155,89,182,0.82)'};
-  const tooltip=svgContainer.append('div').attr('class','d3-tooltip').style('opacity',0).style('position','absolute');
-
-  stackedData.forEach(layer=>{
-    g.selectAll(`.bar-${layer.key}`).data(layer).enter().append('rect')
-      .attr('x',d=>x(d.data.district))
-      .attr('y',d=>y(d[1]))
-      .attr('height',d=>Math.max(0,y(d[0])-y(d[1])))
-      .attr('width',x.bandwidth())
-      .attr('fill',typeColors[layer.key])
-      .attr('rx',2)
-      .on('mouseover',(event,d)=>{
-        const val=d[1]-d[0];
-        tooltip.style('opacity',1)
-          .html(`<strong>${d.data.district}</strong><br/>${layer.key}: ${val} blocks`)
-          .style('left',(event.offsetX+10)+'px').style('top',(event.offsetY-28)+'px');
-      })
-      .on('mouseout',()=>tooltip.style('opacity',0));
-  });
-
-  // X axis
-  g.append('g').attr('class','d3-axis').attr('transform',`translate(0,${h})`)
-   .call(d3.axisBottom(x).tickSize(0))
-   .selectAll('text').attr('transform','rotate(-40)').style('text-anchor','end')
-   .style('fill','#7788aa').style('font-size','9px');
-  g.select('.d3-axis .domain').remove();
-
-  // Y axis
-  g.append('g').attr('class','d3-axis')
-   .call(d3.axisLeft(y).ticks(6))
-   .select('.domain').remove();
-
-  // Legend
-  const legend=g.append('g').attr('transform',`translate(${w+10},0)`);
-  types.forEach((t,i)=>{
-    legend.append('rect').attr('x',0).attr('y',i*18).attr('width',12).attr('height',12)
-      .attr('fill',typeColors[t]).attr('rx',2);
-    legend.append('text').attr('x',16).attr('y',i*18+10)
-      .text(t).style('fill','#7788aa').style('font-size','10px').attr('font-family','Inter,sans-serif');
-  });
+function rerender() {
+  clearConstraintLayer();
+  state.mapView === 'block' ? renderBlockLayer() : renderDistrictLayer();
+  if (state.showConstraints && state.mapView === 'block') renderConstraintLayer();
+  updateStatusBar(); updateBottomCharts();
 }
 
-// ─────────────────── NEW: Split Map ───────────────────
-function initSplitMap() {
-  // Init left (District) map if not already
-  if (!mapLeft) {
-    mapLeft = L.map('map-left',{center:[20.5,84.5],zoom:7,zoomControl:true});
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      {attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19}).addTo(mapLeft);
-  }
-  // Init right (Block) map if not already
-  if (!mapRight) {
-    mapRight = L.map('map-right',{center:[20.5,84.5],zoom:7,zoomControl:false});
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      {attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19}).addTo(mapRight);
-  }
+function initSplitMaps() {
+  if (state.splitInited) return;
+  state.splitInited = true;
+  mapDist = L.map('map-district', { center: map.getCenter(), zoom: map.getZoom(), zoomControl: true });
+  mapBlock = L.map('map-block', { center: map.getCenter(), zoom: map.getZoom(), zoomControl: false });
+  L.tileLayer(TILE_URL, TILE_OPT).addTo(mapDist); L.tileLayer(TILE_URL, TILE_OPT).addTo(mapBlock);
 
-  // Sync zoom & pan between maps
-  mapLeft.on('moveend', ()=>syncMap(mapLeft, mapRight));
-  mapRight.on('moveend', ()=>syncMap(mapRight, mapLeft));
-
-  mapLeft.invalidateSize();
-  mapRight.invalidateSize();
-
-  renderSplitLayers();
-  renderSplitAgreementBar();
+  let syncing = false;
+  function sync(s, t) { s.on('moveend', () => { if (!syncing) { syncing = true; t.setView(s.getCenter(), s.getZoom(), { animate: false }); syncing = false; }}); }
+  sync(mapDist, mapBlock); sync(mapBlock, mapDist);
 }
 
-function syncMap(source, target) {
-  if (splitSyncing) return;
-  splitSyncing = true;
-  target.setView(source.getCenter(), source.getZoom(), {animate:false});
-  splitSyncing = false;
-}
-
-function renderSplitLayers() {
-  if (!blocksData) return;
-
-  // LEFT: District choropleth
-  if (splitLayerLeft) { mapLeft.removeLayer(splitLayerLeft); splitLayerLeft=null; }
-  if (districtsData) {
-    splitLayerLeft = L.geoJSON(districtsData, {
-      style: feature => {
-        const d = getDistrictNameFromFeature(feature);
-        const stat = d ? districtStats[d] : null;
-        if (!stat) return {fillColor:'#1e2d50',fillOpacity:0.6,color:'#4466aa',weight:1.2};
-        return {fillColor:COLORS[stat.dominant]||'#1e2d50',fillOpacity:0.7,color:'#1a2035',weight:1};
-      },
-      onEachFeature: (feature,layer) => {
-        const d = getDistrictNameFromFeature(feature);
-        const stat = d ? districtStats[d] : null;
-        const label = d || 'Unknown';
-        const tip = stat
-          ? `<strong>${label}</strong><br/><span style="color:${COLORS[stat.dominant]||'#aaa'}">${stat.dominant}</span><br/>${stat.blockCount} blocks`
-          : `<strong>${label}</strong>`;
-        layer.bindTooltip(tip,{sticky:true,opacity:0.97});
-        layer.on('click',()=>{ if(d) syncSplitToDistrict(d); });
+function activateSplitView() {
+  initSplitMaps();
+  mapDist.setView(map.getCenter(), map.getZoom()); mapBlock.setView(map.getCenter(), map.getZoom());
+  setTimeout(() => {
+    mapDist.invalidateSize(); mapBlock.invalidateSize();
+    
+    if (splitLayerDist) mapDist.removeLayer(splitLayerDist);
+    splitLayerDist = L.geoJSON(state.districtGeoJSON, {
+      style: f => {
+        const agg = state.districtMap[getDistNameFromDistGeoJSON(f.properties||'')];
+        return { fillColor: agg ? (LABEL_COLORS[agg._label] || '#3a4560') : '#3a4560', fillOpacity: 0.75, color: '#1c2333', weight: 1.2 };
       }
-    }).addTo(mapLeft);
-  }
+    }).addTo(mapDist);
 
-  // RIGHT: Block choropleth
-  if (splitLayerRight) { mapRight.removeLayer(splitLayerRight); splitLayerRight=null; }
-  splitLayerRight = L.geoJSON(
-    {type:"FeatureCollection",features:blocksData.features},
-    {
-      style: f => ({
-        fillColor:COLORS[getPrediction(f.properties)]||COLORS.UNKNOWN,
-        fillOpacity:0.65,
-        color:'rgba(0,0,0,0.2)',weight:0.5
-      }),
-      onEachFeature: (feature,layer) => {
-        const p=feature.properties, pred=getPrediction(p), conf=getConfidence(p).toFixed(1);
-        layer.bindTooltip(`<strong>${p[COLS.blockName]||''}</strong><br/>${p[COLS.district]||''}<br/><span style="color:${COLORS[pred]||'#aaa'}">${pred}</span> ${conf}%`,{sticky:true,opacity:0.97});
+    if (splitLayerBlock) mapBlock.removeLayer(splitLayerBlock);
+    splitLayerBlock = L.geoJSON(state.blockGeoJSON, {
+      style: f => {
+        const r = state.blockDataMap[getBlockName(f.properties||{}).toLowerCase()];
+        return { fillColor: r ? (LABEL_COLORS[r._label] || '#3a4560') : '#3a4560', fillOpacity: 0.78, color: '#1c2333', weight: 0.8 };
       }
-    }
-  ).addTo(mapRight);
-}
+    }).addTo(mapBlock);
 
-/** When a district is clicked on left split map, zoom both maps in */
-function syncSplitToDistrict(districtName) {
-  if (!blocksData) return;
-  const districtBlocks = blocksData.features.filter(f=>f.properties[COLS.district]===districtName);
-  if (districtBlocks.length===0) return;
-  const tempLayer = L.geoJSON({type:"FeatureCollection",features:districtBlocks});
-  const bounds = tempLayer.getBounds();
-  mapLeft.fitBounds(bounds,{padding:[20,20]});
-  // mapRight syncs via moveend
-}
-
-/** Render agreement color cells in split tab footer */
-function renderSplitAgreementBar() {
-  const container=document.getElementById('split-agree-cells');
-  container.innerHTML='';
-  const entries=Object.entries(districtStats).sort((a,b)=>a[0].localeCompare(b[0]));
-  entries.forEach(([d,s])=>{
-    const agreeClass = parseFloat(s.agreePct)>=80 ? 'agree' : 'disagree';
-    const cell=document.createElement('div');
-    cell.className=`agree-cell ${agreeClass}`;
-    cell.title=`${d}: ${s.agreePct}% agree (${s.maupCount} MAUP)`;
-    container.appendChild(cell);
-    // Tooltip via title attribute (accessible)
-    cell.addEventListener('mouseenter', e=>{
-      const tip=document.getElementById('split-cell-tip');
-      if(tip){tip.textContent=cell.title;tip.style.display='block';}
+    const container = document.getElementById('agr-squares');
+    container.innerHTML = '';
+    Object.entries(state.districtMap).sort(([a], [b]) => a.localeCompare(b)).forEach(([name, agg]) => {
+      const sq = document.createElement('div');
+      sq.className = `agr-sq ${agg._agrees ? 'agree' : 'disagree'}`;
+      sq.title = `${name}: ${agg._agreeCount}/${agg.blockCount} blocks agree (${agg._label})`;
+      container.appendChild(sq);
     });
+  }, 50);
+}
+
+function updateStatusBar() {
+  let rows = Object.values(state.blockDataMap);
+  if (state.districtFilter !== 'all') rows = rows.filter(r => (r._district || '').toLowerCase() === state.districtFilter.toLowerCase());
+  if (state.labelFilter !== 'all') rows = rows.filter(r => r._label === state.labelFilter);
+
+  const c = { SOLAR: 0, WIND: 0, BIOMASS: 0, HYBRID: 0, high: 0 };
+  rows.forEach(r => { 
+    if (c[r._label] !== undefined) c[r._label]++; 
+    if (r._conf >= 0.80) c.high++; 
   });
 
-  // Add a floating tooltip element for cell hover
-  if(!document.getElementById('split-cell-tip')) {
-    const tip=document.createElement('span');
-    tip.id='split-cell-tip';
-    tip.style.cssText='position:absolute;background:rgba(8,12,28,0.96);border:1px solid rgba(100,150,255,0.25);color:#ddeeff;font-size:0.72rem;padding:4px 8px;border-radius:4px;pointer-events:none;display:none;z-index:9999;font-family:Inter,sans-serif;';
-    document.body.appendChild(tip);
-    document.getElementById('split-agreement-bar').addEventListener('mousemove',e=>{
-      tip.style.left=(e.clientX+12)+'px'; tip.style.top=(e.clientY-30)+'px';
+  ['solar','wind','biomass','hybrid'].forEach(k => document.getElementById(`sb-${k}`).textContent = c[k.toUpperCase()]);
+  document.getElementById('sb-highconf').textContent = `${c.high} (${rows.length ? ((c.high/rows.length)*100).toFixed(1) : 0}%)`;
+  document.getElementById('sb-showing').textContent = rows.length;
+  document.getElementById('sb-scale').textContent = state.mapView === 'district' ? 'District' : 'Block';
+}
+
+function populateDistrictFilter() {
+  const sel = document.getElementById('district-filter');
+  Object.keys(state.districtMap).sort().forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = opt.textContent = d; sel.appendChild(opt);
+  });
+}
+
+let chartTopBlocks = null, chartDistricts = null;
+
+function initBottomCharts() {
+  const base = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+  const grid = { color: 'rgba(42,52,72,0.8)', borderColor: 'transparent' };
+  const ticks = { color: '#5a6a84', font: { family: "'Space Mono', monospace", size: 9 } };
+
+  chartTopBlocks = new Chart(document.getElementById('chart-top-blocks').getContext('2d'), {
+    type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 0, borderRadius: 2 }] },
+    options: { ...base, indexAxis: 'y', scales: { x: { min: 0, max: 100, grid, ticks: { ...ticks, callback: v => v + '%' } }, y: { grid: { display: false }, ticks: { ...ticks, color: '#8a9bb8' } } } }
+  });
+
+  chartDistricts = new Chart(document.getElementById('chart-districts').getContext('2d'), {
+    type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 0, borderRadius: 2 }] },
+    options: { ...base, scales: { y: { min: 0, max: 100, grid, ticks: { ...ticks, callback: v => v + '%' } }, x: { grid: { display: false }, ticks: { ...ticks, color: '#8a9bb8' } } } }
+  });
+}
+
+function updateBottomCharts() {
+  if (!chartTopBlocks || !chartDistricts) return;
+  let blocks = Object.values(state.blockDataMap);
+  if (state.districtFilter !== 'all') blocks = blocks.filter(r => (r._district || '').toLowerCase() === state.districtFilter.toLowerCase());
+
+  const top15 = [...blocks].sort((a, b) => b._conf - a._conf).slice(0, 15);
+  
+  chartTopBlocks.data.labels = top15.map(r => r.block_name);
+  chartTopBlocks.data.datasets[0].data = top15.map(r => (r._conf * 100).toFixed(1));
+  chartTopBlocks.data.datasets[0].backgroundColor = top15.map(r => state.energy === 'optimal' ? LABEL_COLORS[r._label] : suitabilityColor(r._conf));
+  document.getElementById('chart1-label').textContent = 'RF Confidence';
+  chartTopBlocks.update();
+
+  const dists = Object.entries(state.districtMap).sort(([,a],[,b]) => b._conf - a._conf);
+  chartDistricts.data.labels = dists.map(([d]) => d);
+  chartDistricts.data.datasets[0].data = dists.map(([,a]) => (a._conf * 100).toFixed(1));
+  chartDistricts.data.datasets[0].backgroundColor = dists.map(([,a]) => LABEL_COLORS[a._label] || '#3a4560');
+  chartDistricts.update();
+}
+
+let analyticsInited = false; const aCharts = {};
+
+function initAnalyticsCharts() {
+  if (analyticsInited) return; analyticsInited = true;
+  const rows = Object.values(state.blockDataMap), distMap = state.districtMap;
+  const base = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+  const gridStyle = { color: 'rgba(42,52,72,0.6)', borderColor: 'transparent' };
+  const ticks = { color: '#5a6a84', font: { family: "'Space Mono', monospace", size: 9 } };
+
+  // 1. Prediction Dist
+  const predCounts = { SOLAR: 0, WIND: 0, BIOMASS: 0, HYBRID: 0 };
+  rows.forEach(r => { if(predCounts[r._label] !== undefined) predCounts[r._label]++; });
+  aCharts.predDist = new Chart(document.getElementById('chart-pred-dist').getContext('2d'), {
+    type: 'bar', data: { labels: ['SOLAR','WIND','BIOMASS','HYBRID'], datasets: [{ data: [predCounts.SOLAR, predCounts.WIND, predCounts.BIOMASS, predCounts.HYBRID], backgroundColor: [LABEL_COLORS.SOLAR, LABEL_COLORS.WIND, LABEL_COLORS.BIOMASS, LABEL_COLORS.HYBRID] }] },
+    options: { ...base, scales: { y: { grid: gridStyle, ticks }, x: { grid: { display: false }, ticks } } }
+  });
+
+  // 2. Confidence Dist
+  const confBins = { '60-70': 0, '70-80': 0, '80-90': 0, '90-95': 0, '95-99': 0, '99-100': 0 };
+  rows.forEach(r => { const c = r._conf * 100; if(c<70) confBins['60-70']++; else if(c<80) confBins['70-80']++; else if(c<90) confBins['80-90']++; else if(c<95) confBins['90-95']++; else if(c<99) confBins['95-99']++; else confBins['99-100']++; });
+  aCharts.confDist = new Chart(document.getElementById('chart-conf-dist').getContext('2d'), {
+    type: 'bar', data: { labels: Object.keys(confBins), datasets: [{ data: Object.values(confBins), backgroundColor: ['#d0e048','#78c679','#43a047','#1a9641','#0288d1','#4fc3f7'] }] },
+    options: { ...base, scales: { y: { grid: gridStyle, ticks }, x: { grid: { display: false }, ticks } } }
+  });
+
+  // 3. Scatter
+  aCharts.scatter = new Chart(document.getElementById('chart-scatter').getContext('2d'), {
+    type: 'scatter', data: { datasets: ['SOLAR','WIND','BIOMASS','HYBRID'].map(l => ({ label: l, data: rows.filter(r => r._label === l).map(r => ({ x: parseFloat(r[state.scatterFeature])||0, y: r._conf*100 })), backgroundColor: LABEL_COLORS[l]+'bb' })) },
+    options: { ...base, plugins: { legend: { display: true, labels: { color: '#8a9bb8', font: { size: 10 } } } }, scales: { x: { grid: gridStyle, ticks }, y: { min: 50, max: 105, grid: gridStyle, ticks: { ...ticks, callback: v=>v+'%' } } } }
+  });
+
+  const distData = Object.entries(distMap).map(([name, agg]) => ({ name, constraint: agg.constraint_pct, conf: agg._conf, agree: agg._agreeCount, total: agg.blockCount, counts: agg._labelCounts }));
+  
+  // 4. Constraints Dist
+  const cnstData = [...distData].sort((a,b) => b.constraint - a.constraint);
+  aCharts.constraintDist = new Chart(document.getElementById('chart-constraint-dist').getContext('2d'), {
+    type: 'bar', data: { labels: cnstData.map(d => d.name), datasets: [{ data: cnstData.map(d => d.constraint), backgroundColor: cnstData.map(d => constraintColor(d.constraint)) }] },
+    options: { ...base, scales: { y: { min: 0, max: 100, grid: gridStyle, ticks: { ...ticks, callback: v=>v+'%' } }, x: { grid: { display: false }, ticks } } }
+  });
+
+  // 5. Agreement
+  const agreeData = [...distData].sort((a,b) => (b.agree/b.total) - (a.agree/a.total));
+  aCharts.agreement = new Chart(document.getElementById('chart-agreement').getContext('2d'), {
+    type: 'bar', data: { labels: agreeData.map(d => d.name), datasets: [{ label: 'Agree', data: agreeData.map(d => d.agree), backgroundColor: '#43a047' }, { label: 'Disagree', data: agreeData.map(d => d.total - d.agree), backgroundColor: '#ef5350' }] },
+    options: { ...base, plugins: { legend: { display: true, labels: { color: '#8a9bb8', font: { size: 10 } } } }, scales: { x: { stacked: true, grid: { display: false }, ticks }, y: { stacked: true, grid: gridStyle, ticks } } }
+  });
+
+  // 6. Confidence by Dist
+  const cfData = [...distData].sort((a,b) => b.conf - a.conf);
+  aCharts.confByDist = new Chart(document.getElementById('chart-conf-by-dist').getContext('2d'), {
+    type: 'bar', data: { labels: cfData.map(d => d.name), datasets: [{ data: cfData.map(d => d.conf * 100), backgroundColor: cfData.map(d => suitabilityColor(d.conf)) }] },
+    options: { ...base, scales: { y: { min: 50, max: 100, grid: gridStyle, ticks: { ...ticks, callback: v=>v+'%' } }, x: { grid: { display: false }, ticks } } }
+  });
+
+  // 7. Energy Mix
+  const mixData = [...distData].sort((a,b) => a.name.localeCompare(b.name));
+  aCharts.energyMix = new Chart(document.getElementById('chart-energy-mix').getContext('2d'), {
+    type: 'bar', data: { labels: mixData.map(d => d.name), datasets: [{ label: 'SOLAR', data: mixData.map(d => d.counts.SOLAR || 0), backgroundColor: LABEL_COLORS.SOLAR }, { label: 'WIND', data: mixData.map(d => d.counts.WIND || 0), backgroundColor: LABEL_COLORS.WIND }, { label: 'BIOMASS', data: mixData.map(d => d.counts.BIOMASS || 0), backgroundColor: LABEL_COLORS.BIOMASS }, { label: 'HYBRID', data: mixData.map(d => d.counts.HYBRID || 0), backgroundColor: LABEL_COLORS.HYBRID }] },
+    options: { ...base, plugins: { legend: { display: true, labels: { color: '#8a9bb8', font: { size: 10 } } } }, scales: { x: { stacked: true, grid: { display: false }, ticks }, y: { stacked: true, grid: gridStyle, ticks } } }
+  });
+
+  document.getElementById('da-block-count').textContent = rows.length;
+  document.getElementById('da-dist-count').textContent  = Object.keys(distMap).length;
+
+  // Interactions
+  document.getElementById('scatter-feature-select').addEventListener('change', e => {
+    state.scatterFeature = e.target.value;
+    aCharts.scatter.data.datasets.forEach(ds => {
+      ds.data = rows.filter(r => r._label === ds.label).map(r => ({ x: parseFloat(r[state.scatterFeature])||0, y: r._conf*100 }));
     });
-    document.getElementById('split-agreement-bar').addEventListener('mouseleave',()=>tip.style.display='none');
+    aCharts.scatter.update();
+  });
+
+  document.querySelectorAll('.acard-tab').forEach(btn => btn.addEventListener('click', e => {
+    const mode = e.target.dataset.predmode;
+    document.querySelectorAll('.acard-tab').forEach(b => b.classList.remove('active'));
+    e.target.classList.add('active');
+    const counts = { SOLAR: 0, WIND: 0, BIOMASS: 0, HYBRID: 0 };
+    if (mode === 'block') { rows.forEach(r => { if(counts[r._label] !== undefined) counts[r._label]++; }); } 
+    else { Object.values(distMap).forEach(d => { if(counts[d._label] !== undefined) counts[d._label]++; }); }
+    aCharts.predDist.data.datasets[0].data = [counts.SOLAR, counts.WIND, counts.BIOMASS, counts.HYBRID];
+    aCharts.predDist.update();
+  }));
+}
+
+function showBlockInfoPanel(name, dist, row) {
+  document.getElementById('block-info-content').innerHTML = `
+    <div class="bi-name">${name}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">${dist}</div>
+    <span class="bi-label-pill" style="background:${LABEL_COLORS[row._label]}22;color:${LABEL_COLORS[row._label]};border:1px solid ${LABEL_COLORS[row._label]}55">
+      ${LABEL_ICONS[row._label]} ${row._label} &nbsp;·&nbsp; ${(row._conf*100).toFixed(1)}% conf
+    </span>
+    <span class="bi-score" style="color:${suitabilityColor(row._conf)}">${(row._conf*100).toFixed(1)}%</span>
+    <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">RF CONFIDENCE</div>
+    <div class="bi-row"><span>Solar</span><span class="bi-val">${parseFloat(row.solar_mean).toFixed(3)}</span></div>
+    <div class="bi-row"><span>Wind</span><span class="bi-val">${parseFloat(row.wind_mean).toFixed(3)}</span></div>
+  `;
+  document.getElementById('block-info-section').style.display = 'block';
+}
+
+function switchToView(view) {
+  state.activeView = view;
+  document.querySelectorAll('.app-section').forEach(s => s.classList.remove('active'));
+  document.getElementById(`section-${view}`).classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  if (view === 'map') setTimeout(() => map.invalidateSize(), 50);
+  else if (view === 'split') activateSplitView();
+  else if (view === 'charts') initAnalyticsCharts();
+}
+
+function bindControls() {
+  document.querySelectorAll('.nav-btn').forEach(btn => btn.addEventListener('click', () => switchToView(btn.dataset.view)));
+
+  document.getElementById('view-toggle').addEventListener('click', e => {
+    const btn = e.target.closest('.tgl-btn');
+    if (!btn || btn.dataset.view === state.mapView) return;
+    state.mapView = btn.dataset.view;
+    document.querySelectorAll('#view-toggle .tgl-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    ['district-filter', 'label-filter', 'toggle-constraints'].forEach(id => document.getElementById(id).disabled = (state.mapView === 'district'));
+    rerender();
+  });
+
+  document.getElementById('energy-toggle').addEventListener('click', e => {
+    const btn = e.target.closest('.tgl-btn');
+    if (!btn || btn.dataset.energy === state.energy) return;
+    state.energy = btn.dataset.energy;
+    document.querySelectorAll('#energy-toggle .tgl-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    
+    document.getElementById('legend-optimal').style.display = (state.energy === 'optimal') ? 'flex' : 'none';
+    document.getElementById('legend-suitability').style.display = (state.energy !== 'optimal' && state.energy !== 'constraints') ? 'flex' : 'none';
+    document.getElementById('legend-constraints-key').style.display = (state.energy === 'constraints') ? 'flex' : 'none';
+    rerender();
+  });
+
+  document.getElementById('district-filter').addEventListener('change', e => { state.districtFilter = e.target.value; rerender(); });
+  document.getElementById('label-filter').addEventListener('change', e => { state.labelFilter = e.target.value; rerender(); });
+  document.getElementById('toggle-constraints').addEventListener('change', e => {
+    state.showConstraints = e.target.checked;
+    state.showConstraints && state.mapView === 'block' ? renderConstraintLayer() : clearConstraintLayer();
+  });
+}
+
+function showError(msg) {
+  document.getElementById('error-msg').textContent = '⚠ ' + msg;
+  document.getElementById('error-banner').style.display = 'flex';
+}
+
+async function loadData() {
+  try {
+    const [csvResp, blocksResp, distResp] = await Promise.all([
+      fetch('./block_features.csv'), fetch('./data/blocks_complete.geojson'), fetch('./data/districts_fixed.geojson')
+    ]);
+
+    if (!csvResp.ok || !blocksResp.ok || !distResp.ok) throw new Error('Data fetch failed.');
+
+    const csvRows = parseCSV(await csvResp.text());
+    state.blockDataMap = buildBlockDataMap(csvRows);
+    state.blockGeoJSON = await blocksResp.json();
+    state.districtGeoJSON = await distResp.json();
+
+    const { blockKey, distKey } = scanGeoJSONProps(state.blockGeoJSON);
+    state._geoBlockKey = blockKey; state._geoDistKey = distKey;
+
+    state.districtMap = buildDistrictMap(state.blockGeoJSON, state.blockDataMap);
+
+    populateDistrictFilter();
+    initBottomCharts();
+    bindControls();
+    rerender();
+    document.getElementById('loading-overlay').style.display = 'none';
+  } catch (err) {
+    document.getElementById('loading-overlay').style.display = 'none';
+    showError(`Load error: ${err.message}`);
   }
 }
 
-// ─────────────────── Export ───────────────────
-function exportCSV() {
-  if(!blocksData)return;
-  const filtered=getFilteredFeatures();
-  if(filtered.length===0){alert("No blocks match current filters.");return;}
-  const headers=['block_name','district_n','final_prediction','rf_confidence','cluster','solar_mean','wind_mean','pop_mean','dist_roads_mean','dist_trans_mean','dist_sub_mean','constraint_pct'];
-  const rows=filtered.map(f=>{const p=f.properties;return headers.map(h=>{const v=p[h];return v==null?'':(typeof v==='string'&&v.includes(',')?`"${v}"`:v);}).join(',');});
-  triggerDownload(new Blob([[headers.join(','),...rows].join('\n')],{type:'text/csv'}),'odisha_energy_filtered.csv');
-}
-
-function exportGeoJSON() {
-  if(!blocksData)return;
-  const filtered=getFilteredFeatures();
-  if(filtered.length===0){alert("No blocks match current filters.");return;}
-  triggerDownload(new Blob([JSON.stringify({type:"FeatureCollection",features:filtered},null,2)],{type:'application/json'}),'odisha_energy_filtered.geojson');
-}
-
-function triggerDownload(blob,filename) {
-  const url=URL.createObjectURL(blob), a=document.createElement('a');
-  a.href=url; a.download=filename; document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
-}
-
-// ─────────────────── Init ───────────────────
-document.addEventListener('DOMContentLoaded', function() {
-  initMap();
-  loadData();
-});
+document.addEventListener('DOMContentLoaded', loadData);

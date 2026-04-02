@@ -2,295 +2,203 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Odisha Renewable Energy DSS</title>
-  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet"/>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <link rel="stylesheet" href="style.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-  <!-- LOADING SPINNER OVERLAY -->
-  <div id="loading-overlay">
-    <div id="loading-box">
-      <div id="loading-spinner"></div>
-      <p id="loading-text">Loading data...</p>
+  <header class="app-header">
+    <div class="header-left">
+      <div class="header-emblem">⚡</div>
+      <div>
+        <h1>Odisha Renewable Energy <span class="accent">Decision Support System</span></h1>
+        <p class="header-sub">314 Blocks · 30 Districts &nbsp;|&nbsp; Random Forest Model &nbsp;|&nbsp; 14 Geospatial Datasets</p>
+      </div>
     </div>
-  </div>
-
-  <!-- HEADER -->
-  <header id="main-header">
-    <div id="header-left">
-      <h1>⚡ Odisha Renewable Energy Decision Support System</h1>
-      <p id="header-subtitle">314 Blocks · 30 Districts &nbsp;|&nbsp; Random Forest Model &nbsp;|&nbsp; 14 Geospatial Datasets</p>
-    </div>
-    <div id="header-right">
-      <button class="tab-btn active" id="btn-map"    onclick="showTab('map')">🗺️ Map View</button>
-      <button class="tab-btn"        id="btn-split"  onclick="showTab('split')">⚖️ Split View</button>
-      <button class="tab-btn"        id="btn-charts" onclick="showTab('charts')">📈 Charts</button>
-      <button class="tab-btn"        id="btn-ml"     onclick="showTab('ml')">📊 ML Results</button>
-    </div>
+    <nav class="header-nav">
+      <button class="nav-btn active" data-view="map">🗺️ Map View</button>
+      <button class="nav-btn" data-view="split">⚖️ Split View</button>
+      <button class="nav-btn" data-view="charts">📈 Charts</button>
+      <button class="nav-btn" data-view="mlresults">📊 ML Results</button>
+    </nav>
   </header>
 
-  <!-- MAP TAB -->
-  <div id="tab-map" class="tab-content active">
-
-    <!-- LEFT PANEL -->
-    <div id="control-panel">
-
-      <div class="panel-section">
-        <h3>🌍 Scale View</h3>
-        <div id="scale-btns">
-          <button class="scale-btn active" onclick="switchScale('block')">Block</button>
-          <button class="scale-btn"        onclick="switchScale('district')">District</button>
-        </div>
-        <button id="drilldown-back" onclick="exitDrilldown()" style="display:none;">
-          ← Back to all districts
-        </button>
-      </div>
-
-      <div class="panel-section">
-        <h3>🗂️ Map Layer</h3>
-        <label class="radio-option">
-          <input type="radio" name="layer" value="allocation" checked onchange="switchLayer(this.value)"/>
-          Optimal Allocation
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="layer" value="solar" onchange="switchLayer(this.value)"/>
-          Solar Suitability
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="layer" value="wind" onchange="switchLayer(this.value)"/>
-          Wind Suitability
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="layer" value="biomass" onchange="switchLayer(this.value)"/>
-          Biomass Suitability
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="layer" value="constraints" onchange="switchLayer(this.value)"/>
-          Constraints View
-        </label>
-      </div>
-
-      <div class="panel-section">
-        <h3>🏗️ Hotspot Overlays</h3>
-        <label class="check-option">
-          <input type="checkbox" id="chk-solar"   onchange="toggleOverlay('solar')"/>
-          ☀️ Top Solar Hotspots
-        </label>
-        <label class="check-option">
-          <input type="checkbox" id="chk-wind"    onchange="toggleOverlay('wind')"/>
-          💨 Top Wind Hotspots
-        </label>
-        <label class="check-option">
-          <input type="checkbox" id="chk-biomass" onchange="toggleOverlay('biomass')"/>
-          🌿 Top Biomass Hotspots
-        </label>
-      </div>
-
-      <div class="panel-section">
-        <h3>🔍 Filters</h3>
-        <p class="filter-label">Energy Type</p>
-        <div id="energy-filter-btns">
-          <button class="filter-btn active" data-energy="ALL"    onclick="setEnergyFilter(this)">All</button>
-          <button class="filter-btn"        data-energy="SOLAR"  onclick="setEnergyFilter(this)">Solar</button>
-          <button class="filter-btn"        data-energy="WIND"   onclick="setEnergyFilter(this)">Wind</button>
-          <button class="filter-btn"        data-energy="HYBRID" onclick="setEnergyFilter(this)">Hybrid</button>
-        </div>
-        <p class="filter-label" style="margin-top:10px;">District</p>
-        <select id="district-filter" onchange="setDistrictFilter(this.value)">
-          <option value="ALL">All Districts</option>
-          <option value="Anugul">Anugul</option>
-          <option value="Baleswar">Baleswar</option>
-          <option value="Baragarh">Baragarh</option>
-          <option value="Bhadrak">Bhadrak</option>
-          <option value="Bolangir">Bolangir</option>
-          <option value="Boudh">Boudh</option>
-          <option value="Cuttack">Cuttack</option>
-          <option value="Deogarh">Deogarh</option>
-          <option value="Dhenkanal">Dhenkanal</option>
-          <option value="Gajapati">Gajapati</option>
-          <option value="Ganjam">Ganjam</option>
-          <option value="Jagatsingpur">Jagatsingpur</option>
-          <option value="Jajpur">Jajpur</option>
-          <option value="Jharsuguda">Jharsuguda</option>
-          <option value="Kalahandi">Kalahandi</option>
-          <option value="Kandhamal">Kandhamal</option>
-          <option value="Kendrapada">Kendrapada</option>
-          <option value="Keonjhar">Keonjhar</option>
-          <option value="Khurda">Khurda</option>
-          <option value="Koraput">Koraput</option>
-          <option value="Malkanagiri">Malkanagiri</option>
-          <option value="Mayurbhanj">Mayurbhanj</option>
-          <option value="Nawarangpur">Nawarangpur</option>
-          <option value="Nayagarh">Nayagarh</option>
-          <option value="Nuapada">Nuapada</option>
-          <option value="Puri">Puri</option>
-          <option value="Rayagada">Rayagada</option>
-          <option value="Sambalpur">Sambalpur</option>
-          <option value="Sonepur">Sonepur</option>
-          <option value="Sundargarh">Sundargarh</option>
-        </select>
-        <p class="filter-label" style="margin-top:10px;">Min Confidence: <span id="conf-value">0%</span></p>
-        <input type="range" id="conf-slider" min="0" max="100" value="0" oninput="filterByConfidence(this.value)"/>
-        <p class="filter-label" style="margin-top:10px;">Max Constraint %: <span id="constraint-value">100%</span></p>
-        <input type="range" id="constraint-slider" min="0" max="100" value="100" oninput="filterByConstraint(this.value)"/>
-      </div>
-
-      <div class="panel-section" id="legend-box">
-        <h3>🔑 Legend</h3>
-        <div class="legend-item"><span class="legend-dot solar"></span> Solar</div>
-        <div class="legend-item"><span class="legend-dot wind"></span> Wind</div>
-        <div class="legend-item"><span class="legend-dot biomass"></span> Biomass</div>
-        <div class="legend-item"><span class="legend-dot hybrid"></span> Hybrid</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#445566"></span> Below threshold</div>
-      </div>
-
-      <div class="panel-section" id="constraint-legend" style="display:none;">
-        <h3>☢️ Constraint Level</h3>
-        <div class="legend-item"><span class="legend-dot" style="background:#1a9850"></span> Low (0–20%)</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#fee08b"></span> Moderate (20–50%)</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#f46d43"></span> High (50–80%)</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#8B0000"></span> Severe (80–100%)</div>
-      </div>
-
-      <div class="panel-section">
-        <h3>💾 Export</h3>
-        <button class="export-btn" onclick="exportCSV()">⬇ Download CSV</button>
-        <button class="export-btn" onclick="exportGeoJSON()">⬇ Download GeoJSON</button>
-      </div>
-
-    </div>
-
-    <!-- MAIN MAP -->
-    <div id="map-wrapper">
-      <div id="map"></div>
-
-      <!-- AGREEMENT INSET MINI-CHART -->
-      <div id="agreement-inset" title="Block vs District Agreement">
-        <div id="inset-title">MAUP Agreement</div>
-        <svg id="inset-svg" width="140" height="80"></svg>
-        <div id="inset-legend">
-          <span style="color:#32CD32">■</span> Agree &nbsp;
-          <span style="color:#FF5555">■</span> Disagree
-        </div>
-      </div>
-    </div>
-
-    <!-- RIGHT DETAIL PANEL -->
-    <div id="detail-panel">
-      <div id="detail-default">
-        <h3>📍 Block Details</h3>
-        <p style="color:#8899bb; margin-top:10px; font-size:0.82rem; line-height:1.6;">
-          Click any block on the map to see its full renewable energy profile.
-        </p>
-        <div id="summary-stats">
-          <h4 class="panel-subheading">Odisha Summary</h4>
-          <div id="summary-content">Loading...</div>
-          <h4 class="panel-subheading" style="margin-top:16px;">Scale Comparison</h4>
-          <table id="summary-table">
-            <thead>
-              <tr><th>Scale</th><th>Units</th><th>Dominant</th><th>Agree%</th><th>MAUP</th></tr>
-            </thead>
-            <tbody id="summary-table-body">
-              <tr><td colspan="5" style="color:#445566;text-align:center;">Loading...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div id="detail-block" style="display:none;">
-        <button id="close-detail" onclick="closeDetail()">✕ Close</button>
-        <h3 id="detail-block-name"></h3>
-        <p id="detail-district"></p>
-        <div id="detail-prediction-badge"></div>
-        <div class="detail-section">
-          <p class="detail-label">Confidence Score</p>
-          <div class="progress-bar-bg"><div class="progress-bar-fill" id="detail-confidence-bar"></div></div>
-          <p id="detail-confidence-text"></p>
-        </div>
-        <div class="detail-section">
-          <p class="detail-label">Constraint Level</p>
-          <div class="progress-bar-bg"><div class="progress-bar-fill" id="detail-constraint-bar" style="background:#f46d43"></div></div>
-          <p id="detail-constraint-text"></p>
-        </div>
-        <div class="detail-section">
-          <p class="detail-label">K-Means Cluster</p>
-          <p id="detail-cluster" style="color:#aabbcc; font-size:0.9rem;"></p>
-        </div>
-        <div class="detail-section">
-          <p class="detail-label">Feature Values</p>
-          <table id="detail-features-table"></table>
-        </div>
-        <!-- Mini D3 bar: feature profile for this block -->
-        <div class="detail-section">
-          <p class="detail-label">Feature Profile</p>
-          <svg id="detail-feature-bar" width="100%" height="110"></svg>
-        </div>
-      </div>
-    </div>
-
+  <div class="status-bar" id="status-bar">
+    <span>☀️ Solar: <b id="sb-solar">—</b></span>
+    <span class="sb-sep">|</span>
+    <span>💨 Wind: <b id="sb-wind">—</b></span>
+    <span class="sb-sep">|</span>
+    <span>🌿 Biomass: <b id="sb-biomass">—</b></span>
+    <span class="sb-sep">|</span>
+    <span>⚡ Hybrid: <b id="sb-hybrid">—</b></span>
+    <span class="sb-sep">|</span>
+    <span>🎯 High-Conf ≥80%: <b id="sb-highconf">—</b></span>
+    <span class="sb-sep">|</span>
+    <span>📊 Showing: <b id="sb-showing">—</b> blocks</span>
+    <span class="sb-sep">|</span>
+    <span>🌍 Scale: <b id="sb-scale">Block</b></span>
   </div>
 
-  <!-- SPLIT MAP TAB -->
-  <div id="tab-split" class="tab-content">
-    <div id="split-header">
-      <span class="split-label" style="color:#aac4ff">📍 District View</span>
-      <div id="split-sync-indicator">🔗 Zoom &amp; Pan Synced</div>
-      <span class="split-label" style="color:#aac4ff">🧱 Block View</span>
-    </div>
-    <div id="split-maps-wrapper">
-      <div id="map-left"></div>
-      <div id="split-divider"></div>
-      <div id="map-right"></div>
-    </div>
-    <!-- Agreement mini-viz below split maps -->
-    <div id="split-agreement-bar">
-      <span style="color:#556688;font-size:0.75rem;margin-right:10px;">Agreement by District:</span>
-      <div id="split-agree-cells"></div>
+  <div class="loading-overlay" id="loading-overlay">
+    <div class="loading-box">
+      <div class="loading-spinner"></div>
+      <p id="loading-text">Loading spatial data…</p>
     </div>
   </div>
 
-  <!-- BOTTOM STATS BAR -->
-  <div id="stats-bar">
-    <div class="stat-item">☀️ Solar: <span id="stat-solar">-</span></div>
-    <div class="stat-item">💨 Wind: <span id="stat-wind">-</span></div>
-    <div class="stat-item">🌿 Biomass: <span id="stat-biomass">-</span></div>
-    <div class="stat-item">⚡ Hybrid: <span id="stat-hybrid">-</span></div>
-    <div class="stat-item">🎯 High Conf (≥80%): <span id="stat-highconf">-</span></div>
-    <div class="stat-item">📊 Showing: <span id="stat-showing">-</span> blocks</div>
-    <div class="stat-item">🌍 Scale: <span id="stat-scale">Block</span></div>
+  <div class="error-banner" id="error-banner" style="display:none">
+    <span id="error-msg"></span>
+    <button onclick="document.getElementById('error-banner').style.display='none'">✕</button>
   </div>
 
-  <!-- CHARTS TAB -->
-  <div id="tab-charts" class="tab-content">
-    <div id="charts-container">
-      <div id="charts-header">
+  <div class="app-section active" id="section-map">
+    <div class="app-body">
+
+      <aside class="control-panel">
+        <section class="ctrl-section">
+          <h3 class="ctrl-heading">Scale View</h3>
+          <div class="toggle-group" id="view-toggle">
+            <button class="tgl-btn active" data-view="block">Block</button>
+            <button class="tgl-btn" data-view="district">District</button>
+          </div>
+        </section>
+
+        <section class="ctrl-section">
+          <h3 class="ctrl-heading">Map Layer</h3>
+          <div class="toggle-group" id="energy-toggle">
+            <button class="tgl-btn active" data-energy="optimal">Optimal Allocation</button>
+            <button class="tgl-btn" data-energy="solar">Solar Suitability</button>
+            <button class="tgl-btn" data-energy="wind">Wind Suitability</button>
+            <button class="tgl-btn" data-energy="biomass">Biomass Suitability</button>
+            <button class="tgl-btn" data-energy="constraints">Constraints View</button>
+          </div>
+        </section>
+
+        <section class="ctrl-section">
+          <h3 class="ctrl-heading">Filter by District</h3>
+          <select id="district-filter" class="ctrl-select">
+            <option value="all">All Districts</option>
+          </select>
+        </section>
+
+        <section class="ctrl-section">
+          <h3 class="ctrl-heading">Filter by Energy Type</h3>
+          <select id="label-filter" class="ctrl-select">
+            <option value="all">All Types</option>
+            <option value="SOLAR">☀️ Solar</option>
+            <option value="WIND">💨 Wind</option>
+            <option value="BIOMASS">🌿 Biomass</option>
+            <option value="HYBRID">⚡ Hybrid</option>
+          </select>
+        </section>
+
+        <section class="ctrl-section">
+          <h3 class="ctrl-heading">Overlay</h3>
+          <label class="ctrl-checkbox">
+            <input type="checkbox" id="toggle-constraints" />
+            <span>Highlight High-Constraint Blocks</span>
+          </label>
+        </section>
+
+        <section class="ctrl-section">
+          <h3 class="ctrl-heading">Legend</h3>
+          <div class="legend" id="legend-optimal">
+            <div class="legend-row"><span class="legend-swatch" style="background:#ffa726"></span><span>Solar</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#7b1fa2"></span><span>Wind</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#43a047"></span><span>Biomass</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#0288d1"></span><span>Hybrid</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#3a4560;opacity:.5"></span><span>Below threshold</span></div>
+          </div>
+          <div class="legend" id="legend-suitability" style="display:none">
+            <div class="legend-row"><span class="legend-swatch" style="background:#1a9641"></span><span>High (&gt; 0.70)</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#78c679"></span><span>Good (0.55–0.70)</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#d0e048"></span><span>Moderate (0.40–0.55)</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#fd8d3c"></span><span>Low (0.25–0.40)</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#d7191c"></span><span>Poor (&lt; 0.25)</span></div>
+          </div>
+          <div class="legend" id="legend-constraints-key" style="display:none">
+            <div class="legend-row"><span class="legend-swatch" style="background:#1a9641"></span><span>Low (0–20%)</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#ffffbf"></span><span>Moderate (20–50%)</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#fd8d3c"></span><span>High (50–80%)</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#d7191c"></span><span>Severe (80–100%)</span></div>
+          </div>
+        </section>
+
+        <section class="ctrl-section" id="block-info-section" style="display:none">
+          <h3 class="ctrl-heading">Block Details</h3>
+          <div class="block-info" id="block-info-content"></div>
+        </section>
+      </aside>
+
+      <main class="main-content">
+        <div id="map"></div>
+        <div class="chart-row" id="chart-row">
+          <div class="chart-card">
+            <h4 class="chart-title">Top 15 Blocks · <span id="chart1-label">Optimal Score</span></h4>
+            <canvas id="chart-top-blocks" height="200"></canvas>
+          </div>
+          <div class="chart-card">
+            <h4 class="chart-title">District Summary</h4>
+            <canvas id="chart-districts" height="200"></canvas>
+          </div>
+        </div>
+      </main>
+
+    </div>
+  </div>
+
+  <div class="app-section" id="section-split">
+    <div class="split-top-bar">
+      <div class="split-label-left">📍 District View</div>
+      <div class="split-sync-pill">🔗 Zoom &amp; Pan Synced</div>
+      <div class="split-label-right">🧱 Block View</div>
+    </div>
+    <div class="split-maps-row" id="split-maps-row">
+      <div id="map-district" class="split-map"></div>
+      <div class="split-divider"></div>
+      <div id="map-block" class="split-map"></div>
+    </div>
+    <div class="split-agreement-bar">
+      <span class="agr-title">Agreement by District:</span>
+      <div class="agr-squares" id="agr-squares"></div>
+    </div>
+  </div>
+
+  <div class="app-section" id="section-charts">
+    <div class="full-section-body">
+      <div class="section-heading">
         <h2>📈 Data Analytics</h2>
-        <p>Interactive charts derived from 314 blocks across 30 Odisha districts.</p>
+        <p class="section-sub">Interactive charts derived from <b id="da-block-count">—</b> blocks across <b id="da-dist-count">—</b> Odisha districts.</p>
       </div>
-      <div class="charts-grid">
-        <div class="chart-card" id="card-bar">
-          <div class="chart-card-header">
+      <div class="analytics-grid">
+
+        <div class="analytics-card">
+          <div class="acard-header">
             <h4>Prediction Distribution</h4>
-            <div class="chart-toggle-btns">
-              <button class="ctoggle active" onclick="setBarMode('block',this)">Block</button>
-              <button class="ctoggle"        onclick="setBarMode('district',this)">District</button>
+            <div class="acard-tabs">
+              <button class="acard-tab active" data-predmode="block">Block</button>
+              <button class="acard-tab" data-predmode="district">District</button>
             </div>
           </div>
-          <p class="chart-desc">Count of blocks/districts per energy type prediction.</p>
-          <div style="position:relative; height:260px;"><canvas id="chart-bar"></canvas></div>
+          <p class="acard-sub">Count of blocks/districts per energy type prediction.</p>
+          <canvas id="chart-pred-dist" height="180"></canvas>
         </div>
-        <div class="chart-card">
-          <div class="chart-card-header"><h4>Confidence Distribution</h4></div>
-          <p class="chart-desc">Distribution of Random Forest confidence scores across all blocks.</p>
-          <div style="position:relative; height:260px;"><canvas id="chart-conf"></canvas></div>
+
+        <div class="analytics-card">
+          <div class="acard-header"><h4>Confidence Distribution</h4></div>
+          <p class="acard-sub">Distribution of Random Forest confidence scores across all blocks.</p>
+          <canvas id="chart-conf-dist" height="180"></canvas>
         </div>
-        <div class="chart-card">
-          <div class="chart-card-header">
+
+        <div class="analytics-card">
+          <div class="acard-header">
             <h4>Feature vs Prediction</h4>
-            <select id="scatter-feature" onchange="updateScatter()">
+            <select class="acard-select" id="scatter-feature-select">
               <option value="solar_mean">Solar Mean</option>
               <option value="wind_mean">Wind Mean</option>
               <option value="pop_mean">Population Mean</option>
@@ -300,95 +208,85 @@
               <option value="constraint_pct">Constraint %</option>
             </select>
           </div>
-          <p class="chart-desc">Each dot is one block. Color = predicted energy type.</p>
-          <div style="position:relative; height:260px;"><canvas id="chart-scatter"></canvas></div>
+          <p class="acard-sub">Each dot is one block. Color = predicted energy type.</p>
+          <canvas id="chart-scatter" height="180"></canvas>
         </div>
-        <div class="chart-card">
-          <div class="chart-card-header"><h4>Constraint Severity by District</h4></div>
-          <p class="chart-desc">Average constraint % per district. Higher = more restricted land.</p>
-          <div style="position:relative; height:320px;"><canvas id="chart-constraint"></canvas></div>
+
+        <div class="analytics-card">
+          <div class="acard-header"><h4>Constraint Severity by District</h4></div>
+          <p class="acard-sub">Average constraint % per district. Higher = more restricted land.</p>
+          <canvas id="chart-constraint-dist" height="180"></canvas>
         </div>
-        <div class="chart-card">
-          <div class="chart-card-header"><h4>Block vs District Agreement</h4></div>
-          <p class="chart-desc">Green = block prediction matches district dominant. Red = MAUP disagreement.</p>
-          <div style="position:relative; height:260px;"><canvas id="chart-agreement"></canvas></div>
+
+        <div class="analytics-card">
+          <div class="acard-header"><h4>Block vs District Agreement</h4></div>
+          <p class="acard-sub">Green = block prediction matches district dominant. Red = MAUP disagreement.</p>
+          <canvas id="chart-agreement" height="180"></canvas>
         </div>
-        <!-- NEW: D3 Line chart — avg confidence per district -->
-        <div class="chart-card">
-          <div class="chart-card-header"><h4>Confidence by District (D3)</h4></div>
-          <p class="chart-desc">Average prediction confidence per district, rendered with D3.js.</p>
-          <div id="d3-conf-line" style="width:100%;height:260px;"></div>
+
+        <div class="analytics-card">
+          <div class="acard-header"><h4>Confidence by District</h4></div>
+          <p class="acard-sub">Average prediction confidence per district, sorted descending.</p>
+          <canvas id="chart-conf-by-dist" height="180"></canvas>
         </div>
-        <!-- NEW: D3 Stacked bar — energy type breakdown per district -->
-        <div class="chart-card" style="grid-column:1/-1;">
-          <div class="chart-card-header"><h4>Energy Mix by District (D3)</h4></div>
-          <p class="chart-desc">Stacked breakdown of block energy predictions per district.</p>
-          <div id="d3-stack-bar" style="width:100%;height:300px;overflow-x:auto;"></div>
+
+        <div class="analytics-card analytics-card-full">
+          <div class="acard-header"><h4>Energy Mix by District</h4></div>
+          <p class="acard-sub">Stacked breakdown of block energy predictions per district.</p>
+          <canvas id="chart-energy-mix" height="140"></canvas>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+    <div class="app-section" id="section-mlresults">
+    <div class="full-section-body">
+      <div class="section-heading">
+        <h2>📊 Machine Learning Validation Results</h2>
+        <p class="section-sub">
+          Random Forest model trained on 314 Odisha blocks using 7 geospatial features. &nbsp;
+          Best CV Score: <span class="accent-text">0.9667</span> &nbsp;|&nbsp;
+          Params: max_depth=5, min_samples_split=2, n_estimators=100
+        </p>
+      </div>
+      <div class="mlr-grid">
+        <div class="mlr-card">
+          <h4 class="mlr-card-title">Feature Importance</h4>
+          <div class="mlr-img-wrap"><img src="./images/feature_importance.png" alt="Feature Importance" class="mlr-img" loading="lazy" /></div>
+        </div>
+        <div class="mlr-card">
+          <h4 class="mlr-card-title">Confusion Matrix</h4>
+          <div class="mlr-img-wrap"><img src="./images/confusion_matrix.png" alt="Confusion Matrix" class="mlr-img" loading="lazy" /></div>
+        </div>
+        <div class="mlr-card">
+          <h4 class="mlr-card-title">Correlation Heatmap</h4>
+          <div class="mlr-img-wrap"><img src="./images/correlation_heatmap.png" alt="Correlation Heatmap" class="mlr-img" loading="lazy" /></div>
+        </div>
+        <div class="mlr-card">
+          <h4 class="mlr-card-title">AHP Validation</h4>
+          <div class="mlr-img-wrap"><img src="./images/ahp_validation.png" alt="AHP Validation" class="mlr-img" loading="lazy" /></div>
+        </div>
+        <div class="mlr-card">
+          <h4 class="mlr-card-title">Model Comparison</h4>
+          <div class="mlr-img-wrap"><img src="./images/models_comparison.png" alt="Model Comparison" class="mlr-img" loading="lazy" /></div>
+        </div>
+        <div class="mlr-card">
+          <h4 class="mlr-card-title">SHAP Summary</h4>
+          <div class="mlr-img-wrap"><img src="./images/shap_summary_plot.png" alt="SHAP Summary" class="mlr-img" loading="lazy" /></div>
+        </div>
+        <div class="mlr-card">
+          <h4 class="mlr-card-title">Feature Ablation Study</h4>
+          <div class="mlr-img-wrap"><img src="./images/ablation_study.png" alt="Ablation Study" class="mlr-img" loading="lazy" /></div>
+        </div>
+        <div class="mlr-card">
+          <h4 class="mlr-card-title">MAUP Analysis</h4>
+          <div class="mlr-img-wrap"><img src="./images/maup_analysis.png" alt="MAUP Analysis" class="mlr-img" loading="lazy" /></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ML RESULTS TAB -->
-  <div id="tab-ml" class="tab-content">
-    <div id="ml-container">
-      <h2>📊 Machine Learning Validation Results</h2>
-      <p style="color:#6688aa; margin-bottom:28px; font-size:0.88rem;">
-        Random Forest model trained on 314 Odisha blocks using 7 geospatial features.
-        Best CV Score: <strong style="color:#aac4ff">0.9667</strong> &nbsp;|&nbsp;
-        Params: max_depth=5, min_samples_split=2, n_estimators=100
-      </p>
-      <div class="ml-grid">
-        <div class="ml-card">
-          <h4>Feature Importance</h4>
-          <p>Which input features had the most influence on predictions.</p>
-          <img src="images/feature_importance.png" alt="Feature Importance"/>
-        </div>
-        <div class="ml-card">
-          <h4>Confusion Matrix</h4>
-          <p>Prediction accuracy per energy class. Diagonal = correct predictions.</p>
-          <img src="images/confusion_matrix.png" alt="Confusion Matrix"/>
-        </div>
-        <div class="ml-card">
-          <h4>Correlation Heatmap</h4>
-          <p>How correlated the 7 input features are with each other.</p>
-          <img src="images/correlation_heatmap.png" alt="Correlation Heatmap"/>
-        </div>
-        <div class="ml-card">
-          <h4>AHP Validation</h4>
-          <p>Compares Random Forest predictions against expert-based AHP scoring.</p>
-          <img src="images/ahp_validation.png" alt="AHP Validation"/>
-        </div>
-        <div class="ml-card">
-          <h4>Model Comparison</h4>
-          <p>Random Forest vs XGBoost accuracy comparison.</p>
-          <img src="images/model_comparison.png" alt="Model Comparison"/>
-        </div>
-        <div class="ml-card">
-          <h4>SHAP Summary</h4>
-          <p>Mean |SHAP| values — average impact on model output magnitude per feature.</p>
-          <img src="images/shap_summary.png" alt="SHAP Summary"/>
-        </div>
-        <div class="ml-card">
-          <h4>Feature Ablation Study</h4>
-          <p>Accuracy drop when each feature is removed one at a time.</p>
-          <img src="images/ablation_study.png" alt="Ablation Study"/>
-        </div>
-        <div class="ml-card">
-          <h4>MAUP Analysis</h4>
-          <p>Block vs District scale agreement — 4/30 MAUP effects detected.</p>
-          <img src="images/maup_analysis.png" alt="MAUP Analysis"/>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Scripts — order matters -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
   <script src="app.js"></script>
-
 </body>
 </html>
