@@ -3,14 +3,8 @@
 const LABEL_COLORS = { SOLAR: '#ffa726', WIND: '#7b1fa2', BIOMASS: '#43a047', HYBRID: '#0288d1' };
 const LABEL_ICONS  = { SOLAR: '☀️', WIND: '💨', BIOMASS: '🌿', HYBRID: '⚡' };
 
-const SUITABILITY_COLORS = [
-  { t: 0.80, c: '#1a9641' }, { t: 0.70, c: '#78c679' }, { t: 0.55, c: '#d0e048' },
-  { t: 0.40, c: '#fd8d3c' }, { t: 0.00, c: '#d7191c' },
-];
-
-const CONSTRAINT_VIEW_COLORS = [
-  { t: 0.80, c: '#d7191c' }, { t: 0.50, c: '#fd8d3c' }, { t: 0.20, c: '#ffffbf' }, { t: 0.00, c: '#1a9641' },
-];
+// DYNAMIC RELATIVE COLORING
+const Q_COLORS = ['#d7191c', '#fd8d3c', '#d0e048', '#78c679', '#1a9641'];
 
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png';
 const TILE_OPT = { attribution: '© OSM © CARTO', subdomains: 'abcd', maxZoom: 19 };
@@ -21,7 +15,8 @@ const state = {
   blockDataMap: {}, districtMap: {}, blockGeoJSON: null, districtGeoJSON: null,
   _geoBlockKey: null, _geoDistKey: null,
   predDistMode: 'block', scatterFeature: 'solar_mean', splitInited: false,
-  bounds: { solar: {min:999,max:0}, wind: {min:999,max:0}, biomass: {min:999,max:0} }
+  bounds: { solar: {min:99999, max:-99999}, wind: {min:99999, max:-99999}, biomass: {min:99999, max:-99999} },
+  distBounds: { solar: {min:99999, max:-99999}, wind: {min:99999, max:-99999}, biomass: {min:99999, max:-99999} }
 };
 
 const BLOCK_CANDIDATES = ['block_name','BLOCK_NAME','Block_Name','blockname','BLOCKNAME','block','BLOCK','Block','blk_name','name','NAME','tahsil','TAHSIL'];
@@ -50,29 +45,62 @@ function getDistNameFromDistGeoJSON(props) {
   return '';
 }
 
-function suitabilityColor(score) {
-  for (const { t, c } of SUITABILITY_COLORS) if (score >= t) return c;
-  return SUITABILITY_COLORS[SUITABILITY_COLORS.length - 1].c;
-}
-function constraintColor(pct) {
-  const f = pct / 100;
-  for (const { t, c } of CONSTRAINT_VIEW_COLORS) if (f >= t) return c;
-  return CONSTRAINT_VIEW_COLORS[CONSTRAINT_VIEW_COLORS.length - 1].c;
+// ==========================================
+// SCALING FUNCTIONS (ABSOLUTE vs DYNAMIC)
+// ==========================================
+
+function updateBounds(val, type, boundsObj) {
+  if (isNaN(val)) return;
+  if (val < boundsObj[type].min) boundsObj[type].min = val;
+  if (val > boundsObj[type].max) boundsObj[type].max = val;
 }
 
-// Dynamically scale feature heatmaps for sub-layers
-function getFeatureNorm(val, type) {
-  const b = state.bounds[type];
-  if (b.max === b.min) return 0;
-  return Math.max(0, Math.min(1, (val - b.min) / (b.max - b.min)));
+// 1. DYNAMIC MIN-MAX (For Solar, Wind, Biomass)
+function getLayerColor(val, type) {
+  const isDist = state.mapView === 'district';
+  const b = isDist ? state.distBounds[type] : state.bounds[type];
+
+  // Failsafe
+  if (!b || b.max === b.min) return '#3a4560';
+
+  let norm = (val - b.min) / (b.max - b.min);
+
+  // Invert color for Biomass (Higher population = worse suitability = Red)
+  if (type === 'biomass') {
+    norm = 1 - norm; 
+  }
+
+  if (norm >= 0.8) return '#1a9641';
+  if (norm >= 0.6) return '#78c679';
+  if (norm >= 0.4) return '#d0e048';
+  if (norm >= 0.2) return '#fd8d3c';
+  return '#d7191c';
+}
+
+// 2. ABSOLUTE FIXED THRESHOLDS (For Constraint %)
+// Fixes the bug where 98% and 99% would turn green on dynamic scaling.
+function constraintColor(pct) {
+  if (pct >= 80) return '#d7191c'; // Severe (Red)
+  if (pct >= 50) return '#fd8d3c'; // High (Orange)
+  if (pct >= 20) return '#d0e048'; // Moderate (Yellow)
+  return '#1a9641';                // Low (Green)
+}
+
+// 3. ABSOLUTE FIXED THRESHOLDS (For Confidence)
+function suitabilityColor(score) {
+  if (score >= 0.80) return '#1a9641';
+  if (score >= 0.70) return '#78c679';
+  if (score >= 0.55) return '#d0e048';
+  if (score >= 0.40) return '#fd8d3c';
+  return '#d7191c';
 }
 
 function blockFillColor(row, energy) {
   if (energy === 'optimal') return LABEL_COLORS[row._label] || '#3a4560';
-  if (energy === 'constraints') return constraintColor(parseFloat(row.constraint_pct) || 0);
-  if (energy === 'solar') return suitabilityColor(getFeatureNorm(parseFloat(row.solar_mean)||0, 'solar'));
-  if (energy === 'wind')  return suitabilityColor(getFeatureNorm(parseFloat(row.wind_mean)||0, 'wind'));
-  if (energy === 'biomass') return suitabilityColor(1 - getFeatureNorm(parseFloat(row.pop_mean)||0, 'biomass'));
+  if (energy === 'constraints') return constraintColor(parseFloat(row.constraint_pct)||0); // Fixed Absolute logic
+  if (energy === 'solar') return getLayerColor(parseFloat(row.solar_mean)||0, 'solar');
+  if (energy === 'wind')  return getLayerColor(parseFloat(row.wind_mean)||0, 'wind');
+  if (energy === 'biomass') return getLayerColor(parseFloat(row.pop_mean)||0, 'biomass');
   return suitabilityColor(row._conf);
 }
 
@@ -111,6 +139,7 @@ function buildBlockDataMap(csvRows) {
   });
 
   const bdm = {};
+
   Object.entries(grouped).forEach(([key, rows]) => {
     let r = rows.length === 1 ? { ...rows[0] } : {};
     if (rows.length > 1) {
@@ -121,19 +150,17 @@ function buildBlockDataMap(csvRows) {
       r.district = rows[0].district;
     }
 
-    // PURE ML DATA EXTRACTION
     r._label = (r.final_prediction || r.rf_prediction || 'SOLAR').trim().toUpperCase();
     r._conf = parseFloat(r.rf_confidence) || 0;
     r._district = (r.district || '').trim();
     
-    // Bounds tracking for heatmaps
-    const s = parseFloat(r.solar_mean)||0, w = parseFloat(r.wind_mean)||0, p = parseFloat(r.pop_mean)||0;
-    if(s < state.bounds.solar.min) state.bounds.solar.min = s; if(s > state.bounds.solar.max) state.bounds.solar.max = s;
-    if(w < state.bounds.wind.min) state.bounds.wind.min = w; if(w > state.bounds.wind.max) state.bounds.wind.max = w;
-    if(p < state.bounds.biomass.min) state.bounds.biomass.min = p; if(p > state.bounds.biomass.max) state.bounds.biomass.max = p;
+    updateBounds(parseFloat(r.solar_mean)||0, 'solar', state.bounds);
+    updateBounds(parseFloat(r.wind_mean)||0, 'wind', state.bounds);
+    updateBounds(parseFloat(r.pop_mean)||0, 'biomass', state.bounds);
 
     bdm[key] = r;
   });
+
   return bdm;
 }
 
@@ -155,11 +182,20 @@ function buildDistrictMap(blockGeoJSON, blockDataMap) {
   });
 
   const distMap = {};
+
   Object.entries(grouped).forEach(([dist, { rows, blockCount }]) => {
     const agg = { district: dist, blockCount };
-    agg._conf = rows.reduce((s, r) => s + r._conf, 0) / rows.length;
-    agg.constraint_pct = rows.reduce((s, r) => s + (parseFloat(r.constraint_pct)||0), 0) / rows.length;
     
+    agg.solar_mean = rows.reduce((s, r) => s + (parseFloat(r.solar_mean)||0), 0) / rows.length;
+    agg.wind_mean = rows.reduce((s, r) => s + (parseFloat(r.wind_mean)||0), 0) / rows.length;
+    agg.pop_mean = rows.reduce((s, r) => s + (parseFloat(r.pop_mean)||0), 0) / rows.length;
+    agg.constraint_pct = rows.reduce((s, r) => s + (parseFloat(r.constraint_pct)||0), 0) / rows.length;
+    agg._conf = rows.reduce((s, r) => s + r._conf, 0) / rows.length;
+    
+    updateBounds(agg.solar_mean, 'solar', state.distBounds);
+    updateBounds(agg.wind_mean, 'wind', state.distBounds);
+    updateBounds(agg.pop_mean, 'biomass', state.distBounds);
+
     const lc = { SOLAR: 0, WIND: 0, BIOMASS: 0, HYBRID: 0 };
     rows.forEach(r => { if(lc[r._label] !== undefined) lc[r._label]++; });
     
@@ -169,6 +205,7 @@ function buildDistrictMap(blockGeoJSON, blockDataMap) {
     agg._agrees = (agg._agreeCount / blockCount) >= 0.5;
     distMap[dist] = agg;
   });
+
   return distMap;
 }
 
@@ -201,10 +238,10 @@ function buildBlockPopup(name, dist, row) {
       <div class="popup-ml-score" style="color:${scoreColor}">${pct}%</div>
       <div class="popup-score-bar"><div class="popup-score-fill" style="width:${pct}%;background:${scoreColor}"></div></div>
       <div class="popup-grid">
-        <span class="pk">Solar Mean</span><span class="pv">${parseFloat(row.solar_mean).toFixed(3)}</span>
-        <span class="pk">Wind Mean</span><span class="pv">${parseFloat(row.wind_mean).toFixed(3)}</span>
+        <span class="pk">Solar Mean</span><span class="pv">${parseFloat(row.solar_mean).toFixed(2)}</span>
+        <span class="pk">Wind Mean</span><span class="pv">${parseFloat(row.wind_mean).toFixed(2)}</span>
         <span class="pk">Constraint</span><span class="pv">${parseFloat(row.constraint_pct).toFixed(1)}%</span>
-        <span class="pk">Dist. Roads</span><span class="pv">${parseFloat(row.dist_roads_mean).toFixed(2)}</span>
+        <span class="pk">Population</span><span class="pv">${parseFloat(row.pop_mean).toFixed(0)}</span>
       </div>
     </div>`;
 }
@@ -280,8 +317,15 @@ function renderDistrictLayer() {
     style: feat => {
       const agg = state.districtMap[getDistNameFromDistGeoJSON(feat.properties || '')];
       if (!agg) return { fillColor: '#3a4560', fillOpacity: 0.25, color: '#2a3448', weight: 1 };
-      const fillColor = state.energy === 'optimal' ? (LABEL_COLORS[agg._label] || '#3a4560') :
-        state.energy === 'constraints' ? constraintColor(agg.constraint_pct) : suitabilityColor(agg._conf);
+      
+      let fillColor;
+      if (state.energy === 'optimal') fillColor = LABEL_COLORS[agg._label] || '#3a4560';
+      else if (state.energy === 'constraints') fillColor = constraintColor(agg.constraint_pct); // Fixed Absolute logic
+      else if (state.energy === 'solar') fillColor = getLayerColor(agg.solar_mean, 'solar');
+      else if (state.energy === 'wind') fillColor = getLayerColor(agg.wind_mean, 'wind');
+      else if (state.energy === 'biomass') fillColor = getLayerColor(agg.pop_mean, 'biomass');
+      else fillColor = suitabilityColor(agg._conf);
+
       return { fillColor, fillOpacity: 0.72, color: '#1c2333', weight: 1.2 };
     },
     onEachFeature: (feat, layer) => {
@@ -462,7 +506,7 @@ function initAnalyticsCharts() {
 
   const distData = Object.entries(distMap).map(([name, agg]) => ({ name, constraint: agg.constraint_pct, conf: agg._conf, agree: agg._agreeCount, total: agg.blockCount, counts: agg._labelCounts }));
   
-  // 4. Constraints Dist
+  // 4. Constraints Dist (Now uses Absolute constraintColor!)
   const cnstData = [...distData].sort((a,b) => b.constraint - a.constraint);
   aCharts.constraintDist = new Chart(document.getElementById('chart-constraint-dist').getContext('2d'), {
     type: 'bar', data: { labels: cnstData.map(d => d.name), datasets: [{ data: cnstData.map(d => d.constraint), backgroundColor: cnstData.map(d => constraintColor(d.constraint)) }] },
@@ -521,10 +565,9 @@ function showBlockInfoPanel(name, dist, row) {
     <span class="bi-label-pill" style="background:${LABEL_COLORS[row._label]}22;color:${LABEL_COLORS[row._label]};border:1px solid ${LABEL_COLORS[row._label]}55">
       ${LABEL_ICONS[row._label]} ${row._label} &nbsp;·&nbsp; ${(row._conf*100).toFixed(1)}% conf
     </span>
-    <span class="bi-score" style="color:${suitabilityColor(row._conf)}">${(row._conf*100).toFixed(1)}%</span>
-    <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">RF CONFIDENCE</div>
-    <div class="bi-row"><span>Solar</span><span class="bi-val">${parseFloat(row.solar_mean).toFixed(3)}</span></div>
-    <div class="bi-row"><span>Wind</span><span class="bi-val">${parseFloat(row.wind_mean).toFixed(3)}</span></div>
+    <div class="bi-row" style="margin-top:10px"><span>Solar</span><span class="bi-val">${parseFloat(row.solar_mean).toFixed(2)}</span></div>
+    <div class="bi-row"><span>Wind</span><span class="bi-val">${parseFloat(row.wind_mean).toFixed(2)}</span></div>
+    <div class="bi-row"><span>Constraint</span><span class="bi-val">${parseFloat(row.constraint_pct).toFixed(1)}%</span></div>
   `;
   document.getElementById('block-info-section').style.display = 'block';
 }
@@ -559,9 +602,15 @@ function bindControls() {
     document.querySelectorAll('#energy-toggle .tgl-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     
-    document.getElementById('legend-optimal').style.display = (state.energy === 'optimal') ? 'flex' : 'none';
-    document.getElementById('legend-suitability').style.display = (state.energy !== 'optimal' && state.energy !== 'constraints') ? 'flex' : 'none';
-    document.getElementById('legend-constraints-key').style.display = (state.energy === 'constraints') ? 'flex' : 'none';
+    // UPDATED LEGEND TOGGLE: Switches between Absolute vs Relative Legends perfectly
+    const optLeg = document.getElementById('legend-optimal');
+    const relLeg = document.getElementById('legend-relative');
+    const conLeg = document.getElementById('legend-constraints-key');
+    
+    if (optLeg) optLeg.style.display = (state.energy === 'optimal') ? 'flex' : 'none';
+    if (relLeg) relLeg.style.display = (state.energy === 'solar' || state.energy === 'wind' || state.energy === 'biomass') ? 'flex' : 'none';
+    if (conLeg) conLeg.style.display = (state.energy === 'constraints') ? 'flex' : 'none';
+    
     rerender();
   });
 
