@@ -107,27 +107,28 @@
 
         <section class="ctrl-section">
           <h3 class="ctrl-heading">Legend</h3>
+          
           <div class="legend" id="legend-optimal">
             <div class="legend-row"><span class="legend-swatch" style="background:#ffa726"></span><span>Solar</span></div>
             <div class="legend-row"><span class="legend-swatch" style="background:#7b1fa2"></span><span>Wind</span></div>
             <div class="legend-row"><span class="legend-swatch" style="background:#43a047"></span><span>Biomass</span></div>
             <div class="legend-row"><span class="legend-swatch" style="background:#0288d1"></span><span>Hybrid</span></div>
-            <div class="legend-row"><span class="legend-swatch" style="background:#3a4560;opacity:.5"></span><span>Below threshold</span></div>
           </div>
-          <div class="legend" id="legend-suitability" style="display:none">
-            <div class="legend-row"><span class="legend-swatch" style="background:#1a9641"></span><span>High (&gt; 0.70)</span></div>
-            <div class="legend-row"><span class="legend-swatch" style="background:#78c679"></span><span>Good (0.55–0.70)</span></div>
-            <div class="legend-row"><span class="legend-swatch" style="background:#d0e048"></span><span>Moderate (0.40–0.55)</span></div>
-            <div class="legend-row"><span class="legend-swatch" style="background:#fd8d3c"></span><span>Low (0.25–0.40)</span></div>
-            <div class="legend-row"><span class="legend-swatch" style="background:#d7191c"></span><span>Poor (&lt; 0.25)</span></div>
+          
+          <div class="legend" id="legend-relative" style="display:none">
+            <div class="legend-row"><span class="legend-swatch" style="background:#1a9641"></span><span>High / Best</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#78c679"></span><span>Good</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#d0e048"></span><span>Moderate</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#fd8d3c"></span><span>Poor</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#d7191c"></span><span>Low / Worst</span></div>
           </div>
+
           <div class="legend" id="legend-constraints-key" style="display:none">
             <div class="legend-row"><span class="legend-swatch" style="background:#1a9641"></span><span>Low (0–20%)</span></div>
-            <div class="legend-row"><span class="legend-swatch" style="background:#ffffbf"></span><span>Moderate (20–50%)</span></div>
+            <div class="legend-row"><span class="legend-swatch" style="background:#d0e048"></span><span>Moderate (20–50%)</span></div>
             <div class="legend-row"><span class="legend-swatch" style="background:#fd8d3c"></span><span>High (50–80%)</span></div>
             <div class="legend-row"><span class="legend-swatch" style="background:#d7191c"></span><span>Severe (80–100%)</span></div>
           </div>
-          
         </section>
       
         <section class="ctrl-section" id="block-info-section" style="display:none">
@@ -241,7 +242,7 @@
     </div>
   </div>
 
-    <div class="app-section" id="section-mlresults">
+  <div class="app-section" id="section-mlresults">
     <div class="full-section-body">
       <div class="section-heading">
         <h2>📊 Machine Learning Validation Results</h2>
