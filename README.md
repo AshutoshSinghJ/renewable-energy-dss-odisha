@@ -496,9 +496,9 @@ This project was collaboratively developed at **KIIT University, Bhubaneswar** (
 |--------|------|--------|
 | Ashutosh Singh | Project Lead, System Architect & ML Engineer | [@AshutoshSinghJ](https://github.com/AshutoshSinghJ) |
 | Divyanshu Puri | ML Engineer & GIS Developer | [@assassindiv](https://github.com/assassindiv) |
-| Aryan Singh | GIS Developer & ML Engineer | *(add GitHub if available)* |
+| Aryan Singh | GIS Developer & ML Engineer |[@arysha123] (https://github.com/arysha123) |
 | Keshav | GIS Analyst | *(add GitHub if available)* |
-| Astitva Tripathi | GIS / Data Processing | *(add GitHub if available)* |
+| Astitva Tripathi | GIS / Data Processing |[@Fighter-web-debug] (https://github.com/Fighter-web-debug) |
 | Madhusudhan | Data Processing / GIS Developer | *(add GitHub if available)* |
 
 **Repository:** [github.com/AshutoshSinghJ/renewable-energy-dss-odisha](https://github.com/AshutoshSinghJ/renewable-energy-dss-odisha)
