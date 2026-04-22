@@ -1,3 +1,4 @@
+[![Status](https://img.shields.io/badge/status-Phase%206%20Complete-success.svg)](https://github.com/AshutoshSinghJ/sustainable-resource_mapping)
 # 🌿 Multi-Resource Renewable Energy Potential Mapping
 ## ML-Based Decision Support System | Odisha, India
 
@@ -288,24 +289,22 @@ District level (30 samples) was insufficient for statistically valid 5-fold cros
 
 ---
 
-### Phase 6: Decision Support System & Web Visualization 🔄 *(In Progress)*
+### Phase 6: Decision Support System & Web Visualization ✅
 **Lead:** Madhusudhan
 
-**Objective:** Dark-themed interactive web DSS with 4 core map views and ML dashboard — deployed publicly via GitHub Pages.
+**Objective:** A production-grade, lightweight web DSS deployed publicly via GitHub Pages, serving as a high-performance, interactive visualization layer for the final ML suitability results.
 
-#### Core Map Views
-1. **Solar Suitability Heatmap** — Block choropleth, red-to-green (solar_mean)
-2. **Wind Suitability Heatmap** — Block choropleth, light-to-dark blue (wind_mean)
-3. **Biomass Suitability Heatmap** — Block choropleth, yellow-to-green (pop_mean)
-4. **Optimal Resource Allocation Map** — Each block colored by final ML prediction
+#### Technical Architecture & Features
+- **Frontend Stack:** Pure Vanilla JavaScript, HTML5, and CSS3. Stripped of all heavy live backend ML logic to ensure instantaneous load times.
+- **Mapping Engine:** Advanced dual-view mapping system built to visualize scale-dependent agreement between district and block-level predictions.
+- **Data Visualization:** Interactive analytics dashboard featuring 7 dynamic charts.
+- **Data Pipeline:** Directly consumes pre-calculated CSV and GeoJSON model outputs from Phase 5 for maximum rendering speed and reliability.
+- **Deployment:** Fully hosted and live on GitHub Pages.
 
-Color scheme: 🟠 SOLAR `#FF8C00` | 🔵 WIND `#1E90FF` | 🟢 BIOMASS `#32CD32` | 🟣 HYBRID `#9B59B6`
-
-**Tech Stack:** HTML + CSS + Leaflet.js + Chart.js
-
-**Deployment:** GitHub Pages
-
-**Live Demo:** *(Coming soon)*
+#### Critical Deployments & Fixes
+- Successfully resolved coordinate projection mismatches that hindered earlier renders.
+- Fixed complex local file pathing bugs to ensure smooth cloud deployment.
+- Transitioned from a heavy Python modeling environment to a presentation-ready portfolio interface.
 
 ---
 
