@@ -13,7 +13,7 @@
 
 ## 🚀 Live Deployment
 
-* 🌐 Web App (Vercel): Coming Soon
+* 🌐 **Web App (Vercel)[Live->](https://renewable-energy-dss-odisha.vercel.app/)**
 * 📊 **GitHub Pages (Static Dashboard): [Live →](https://ashutoshsinghj.github.io/renewable-energy-dss-odisha/)**
 
 ---
