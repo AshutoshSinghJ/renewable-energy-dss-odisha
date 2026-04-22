@@ -1,4 +1,4 @@
-[![Status](https://img.shields.io/badge/status-Phase%206%20Complete-success.svg)](https://github.com/AshutoshSinghJ/sustainable-resource_mapping)
+[![Status](https://img.shields.io/badge/status-Phase%206%20Complete-success.svg)](https://github.com/AshutoshSinghJ/renewable-energy-dss-odisha)
 # 🌿 Multi-Resource Renewable Energy Potential Mapping
 ## ML-Based Decision Support System | Odisha, India
 
@@ -6,8 +6,15 @@
 [![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3+-orange.svg)](https://scikit-learn.org/)
 [![XGBoost](https://img.shields.io/badge/XGBoost-2.0+-red.svg)](https://xgboost.readthedocs.io/)
 [![QGIS](https://img.shields.io/badge/QGIS-3.x-green.svg)](https://qgis.org/)
-[![Status](https://img.shields.io/badge/status-Phase%205%20Complete-success.svg)](https://github.com/AshutoshSinghJ/sustainable-resource_mapping)
+[![Status](https://img.shields.io/badge/status-Phase%206%20Complete-success.svg)](https://github.com/AshutoshSinghJ/renewable-energy-dss-odisha)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+---
+
+## 🚀 Live Deployment
+
+* 🌐 Web App (Vercel): Coming Soon
+* 📊 **GitHub Pages (Static Dashboard): [Live →](https://ashutoshsinghj.github.io/renewable-energy-dss-odisha/)**
 
 ---
 
@@ -25,8 +32,8 @@ A comprehensive **6-phase geospatial machine learning pipeline** for optimal ren
 
 | Member | Role | Contribution |
 |--------|------|--------------|
-| **Ashutosh Singh** | **Project Lead & System Architect** | Complete project planning and system design, Phase 1 data collection and QGIS implementation, Phase 4 block-level upgrade (314 blocks), coordination across all 6 phases |
-| **Aryan Singh** | GIS Developer | Phase 2 spatial constraint modeling and buffer analysis |
+| **Ashutosh Singh** | **Project Lead, System Architect & ML Engineer** | Complete project planning and system design, Phase 1 data collection and QGIS implementation, Phase 4 block-level upgrade (314 blocks), coordination across all 6 phases. Explored and identified suitable ML models and guided model selection strategy. |
+| **Aryan Singh** | GIS Developer & ML Engineer | Phase 2 spatial constraint modeling and buffer analysis. Assisted in ML model understanding, evaluation, and selection support. |
 | **Keshav** | GIS Analyst | Phase 3 MCDA suitability scoring and raster processing |
 | **Astitva Tripathi** | GIS / Data Processing | Phase 4 district-level zonal statistics and initial feature extraction (30 districts) |
 | **Divyanshu Puri** | ML Engineer & GIS Developer | Phase 5 complete ML pipeline — K-Means, Random Forest, XGBoost, SHAP |
@@ -45,6 +52,8 @@ A comprehensive **6-phase geospatial machine learning pipeline** for optimal ren
 | Phase 5 — ML Pipeline & Model Training | Divyanshu Puri |
 | Phase 6 — Web DSS & Visualization | Madhusudhan |
 | Machine Learning Model Design | Divyanshu Puri |
+| ML Model Research & Selection Strategy | Ashutosh Singh |
+| ML Model Support & Evaluation Assistance | Aryan Singh |
 | UI / Web Dashboard |Madhusudhan|
 
 ---
@@ -296,8 +305,12 @@ District level (30 samples) was insufficient for statistically valid 5-fold cros
 
 #### Technical Architecture & Features
 - **Frontend Stack:** Pure Vanilla JavaScript, HTML5, and CSS3. Stripped of all heavy live backend ML logic to ensure instantaneous load times.
-- **Mapping Engine:** Advanced dual-view mapping system built to visualize scale-dependent agreement between district and block-level predictions.
-- **Data Visualization:** Interactive analytics dashboard featuring 7 dynamic charts.
+- **Mapping Engine:** Advanced dual-view mapping system (Map View + Split View) built to visualize scale-dependent agreement between district and block-level predictions.
+- **Map Layers:** Optimal Allocation, Solar Suitability, Wind Suitability, Biomass Suitability, Constraints View — switchable in real time.
+- **Filter Controls:** Filter by District, filter by Energy Type (Solar / Wind / Biomass / Hybrid), toggle high-constraint block overlay.
+- **Split View:** Synchronized zoom & pan between district-level and block-level prediction maps with per-district agreement scoring.
+- **Data Visualization:** Interactive analytics dashboard featuring 7 dynamic charts — Prediction Distribution, Confidence Distribution, Feature vs Prediction scatter, Constraint Severity by District, Block vs District Agreement, Confidence by District, and Energy Mix by District.
+- **ML Results Tab:** Displays 8 embedded model visualisation images — Feature Importance, Confusion Matrix, Correlation Heatmap, AHP Validation, Model Comparison, SHAP Summary, Ablation Study, MAUP Analysis.
 - **Data Pipeline:** Directly consumes pre-calculated CSV and GeoJSON model outputs from Phase 5 for maximum rendering speed and reliability.
 - **Deployment:** Fully hosted and live on GitHub Pages.
 
@@ -306,13 +319,15 @@ District level (30 samples) was insufficient for statistically valid 5-fold cros
 - Fixed complex local file pathing bugs to ensure smooth cloud deployment.
 - Transitioned from a heavy Python modeling environment to a presentation-ready portfolio interface.
 
+**🌐 Live:** [ashutoshsinghj.github.io/renewable-energy-dss-odisha](https://ashutoshsinghj.github.io/renewable-energy-dss-odisha/)
+
 ---
 
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/AshutoshSinghJ/sustainable-resource_mapping.git
-cd sustainable-resource_mapping
+git clone https://github.com/AshutoshSinghJ/renewable-energy-dss-odisha.git
+cd renewable-energy-dss-odisha
 pip install -r requirements.txt
 python phase5/phase5_ml.py
 ```
@@ -326,7 +341,7 @@ python phase5/phase5_ml.py
 ## 📂 Repository Structure
 
 ```
-sustainable-resource_mapping/
+renewable-energy-dss-odisha/
 │
 ├── .gitignore
 ├── requirements.txt
@@ -382,8 +397,20 @@ sustainable-resource_mapping/
 │       ├── model_simple.pkl
 │       └── *.png + *.csv (simplified run)
 │
-└── phase6/
-    └── README.md                    ← Web DSS spec — in progress
+└── phase6/                          ← Web DSS (Madhusudhan) — Live on GitHub Pages
+    ├── README.md
+    ├── index.html                   ← Main dashboard entry point
+    ├── style.css                    ← Dark-themed UI stylesheet
+    ├── app.js                       ← Core map + chart logic (Leaflet.js + Chart.js)
+    └── images/                      ← Embedded ML visualisation PNGs
+        ├── feature_importance.png
+        ├── confusion_matrix.png
+        ├── correlation_heatmap.png
+        ├── ahp_validation.png
+        ├── models_comparison.png
+        ├── shap_summary_plot.png
+        ├── ablation_study.png
+        └── maup_analysis.png
 ```
 
 ---
@@ -443,7 +470,7 @@ joblib>=1.3.0
   year        = {2026},
   institution = {KIIT University, Bhubaneswar},
   publisher   = {GitHub},
-  howpublished = {\url{https://github.com/AshutoshSinghJ/sustainable-resource_mapping}}
+  howpublished = {\url{https://github.com/AshutoshSinghJ/renewable-energy-dss-odisha}}
 }
 ```
 
@@ -467,16 +494,16 @@ This project was collaboratively developed at **KIIT University, Bhubaneswar** (
 
 | Member | Role | GitHub |
 |--------|------|--------|
-| Ashutosh Singh | Project Lead & System Architect | [@AshutoshSinghJ](https://github.com/AshutoshSinghJ) |
+| Ashutosh Singh | Project Lead, System Architect & ML Engineer | [@AshutoshSinghJ](https://github.com/AshutoshSinghJ) |
 | Divyanshu Puri | ML Engineer & GIS Developer | [@assassindiv](https://github.com/assassindiv) |
-| Aryan Singh | GIS Developer | *(add GitHub if available)* |
+| Aryan Singh | GIS Developer & ML Engineer | *(add GitHub if available)* |
 | Keshav | GIS Analyst | *(add GitHub if available)* |
 | Astitva Tripathi | GIS / Data Processing | *(add GitHub if available)* |
 | Madhusudhan | Data Processing / GIS Developer | *(add GitHub if available)* |
 
-**Repository:** [github.com/AshutoshSinghJ/sustainable-resource_mapping](https://github.com/AshutoshSinghJ/sustainable-resource_mapping)
+**Repository:** [github.com/AshutoshSinghJ/renewable-energy-dss-odisha](https://github.com/AshutoshSinghJ/renewable-energy-dss-odisha)
 
-**For questions or collaboration:** Open a [GitHub Issue](https://github.com/AshutoshSinghJ/sustainable-resource_mapping/issues) and tag the relevant team member.
+**For questions or collaboration:** Open a [GitHub Issue](https://github.com/AshutoshSinghJ/renewable-energy-dss-odisha/issues) and tag the relevant team member.
 
 ---
 
@@ -495,4 +522,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-**Last Updated:** March 2026 | **Version:** 3.0 | **Status:** Phase 5 ✅ Complete | Phase 6 🔄 In Progress
+**Last Updated:** April 2026 | **Version:** 4.0 | **Status:** Phase 5 ✅ Complete | Phase 6 ✅ Complete | **[🌐 Live Dashboard](https://ashutoshsinghj.github.io/renewable-energy-dss-odisha/)**
